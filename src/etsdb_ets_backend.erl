@@ -1,5 +1,6 @@
 %% -------------------------------------------------------------------
 %%
+%% etsdb_ets_backend: ets table backend for etsdb. 
 %%
 %% Copyright (c) Dreyk.  All Rights Reserved.
 %%
@@ -17,41 +18,28 @@
 %% specific language governing permissions and limitations
 %% under the License.
 
-%% @doc Simple implementation tsdb bucket for storing some data in {id,time} order
--module(etsdb_tkb).
+%% @doc etsdb_ets_backend it's ets table backend.
+-module(etsdb_ets_backend).
 
 
+-export([init/2,
+		 save/2]).
 
--export([serialize/1,
-		 unserialize/2,
-		 api_version/0,
-		 w_val/0,
-		 r_val/0,
-		 quorum/0,
-		 merge_conflict/3,
-		 fold/2,partition/2]).
+-define(ETS(I), list_to_atom("ets_tsdb_"++integer_to_list(I))).
 
--behaviour(etsdb_bucket).
+-record(state,{table}).
 
-api_version()->
-	"0.1".
-serialize({{ID,Time},Value})->
-	Key = <<ID:64/integer,Time:64/integer>>,
-	{Key,term_to_binary(Value)}.
-unserialize(<<ID:64/integer,Time:64/integer>>,Value)->
-	{{ID,Time},binary_to_term(Value)}.
+init(Index,_Conf)->
+	Tid = ets:new(?ETS(Index),[ordered_set,protected,named_table,{read_concurrency,true}]),
+	{ok,#state{table=Tid}}.
 
-w_val()->
-	3.
-r_val()->
-	3.
-quorum()->
-	2.
-partition({{_ID,Time},_Value},Count)->
-	Interval = round(60*60*1000/Count),
-	(Time rem Interval) +1.
-merge_conflict(_K,V1,_V2)->
-	V1.
 
-fold(_K,_V)->
-	ok.
+save(O,#state{table=Tab}=State)->
+	Res = case catch ets:insert(Tab,O) of
+			  true->
+				  ok;
+			  Else->
+				  {error,Else}
+		  end,
+	{Res,State}.
+

@@ -22,15 +22,35 @@
 -author('Alex G. <gunin@mail.mipt.ru>').
 
 -export([start_vnode/1,
-		 init/1]).
+		 init/1,
+		 handle_command/3]).
 
 -behaviour(riak_core_vnode).
 
--record(state,{delete_mod,vnode_index}).
+-include("etsdb_request.hrl").
+
+-record(state,{delete_mod,vnode_index,backend,backend_ref}).
 
 start_vnode(I) ->
     riak_core_vnode_master:get_vnode_pid(I, etsdb_vnode).
 
 init([Index]) ->
     DeleteMode = app_helper:get_env(etsdb, delete_mode, 3000),
-    {ok,#state{vnode_index=Index,delete_mod=DeleteMode}}.
+	{BackEndModule,BackEndProps} = app_helper:get_env(etsdb, backend,{etsdb_ets_backend,[]}),
+	case BackEndModule:init(Index,BackEndProps) of
+		{ok,Ref}->
+    		{ok,#state{vnode_index=Index,delete_mod=DeleteMode,backend=BackEndModule,backend_ref=Ref}};
+		{error,Else}->
+			{error,Else}
+	end.
+
+handle_command(?ETSDB_INNERSTORE_REQ{value=Value,req_id=ReqID}, Sender,State)->
+	 save_internal(Sender,Value,ReqID,State);
+handle_command(?ETSDB_STORE_REQ{bucket=Bucket,value=Value,timestamp=Time,req_id=ReqID}, Sender,State)->
+	ObjectToStore = etsdb_object:make_object(Bucket,Value, Time),
+	save_internal(Sender,ObjectToStore,ReqID,State).
+
+save_internal(Sender,Value,ReqID,#state{backend=BackEndModule,backend_ref=BackEndRef,vnode_index=Index}=State)->
+	{Result,NewBackEndRef} = BackEndModule:save(Value,BackEndRef),
+	riak_core_vnode:reply(Sender, {w,Index,ReqID,Result}),
+	{ok,State#state{backend_ref=NewBackEndRef}}.

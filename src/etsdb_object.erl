@@ -20,12 +20,18 @@
 %% @doc Bootstrapping the etsdb extension application.
 -module(etsdb_object).
 
--export([make_object/2]).
+-export([make_kv/3]).
 
-make_object(Bucket,UserObject)->
+make_kv(Bucket,{batch,UserObjects},TimeStamp)->
+	Vals = lists:foldl(fun(UserObject,Acc)->
+							   StorageObject = make_kv(Bucket,UserObject,TimeStamp),
+							   [StorageObject|Acc] end,[],UserObjects),
+	lists:reverse(Vals);
+make_kv(Bucket,UserObject,TimeStamp)->
 	{UserKey,UserData} = Bucket:serialize(UserObject),
 	Prefix = atom_to_binary(Bucket,latin1),
 	StorageKey = <<Prefix/binary,":",UserKey>>,
-	{StorageKey,UserData}.
+	StorageData = <<1,TimeStamp:64/integer,UserData/integer>>,
+	{StorageKey,StorageData}.
 
 
