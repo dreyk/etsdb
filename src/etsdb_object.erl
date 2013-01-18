@@ -17,7 +17,7 @@
 %% specific language governing permissions and limitations
 %% under the License.
 
-%% @doc Bootstrapping the etsdb extension application.
+%% @doc Interface functions for serialize/unserialize user objects.
 -module(etsdb_object).
 
 -export([make_kv/3]).
@@ -30,8 +30,8 @@ make_kv(Bucket,{batch,UserObjects},TimeStamp)->
 make_kv(Bucket,UserObject,TimeStamp)->
 	{UserKey,UserData} = Bucket:serialize(UserObject),
 	Prefix = atom_to_binary(Bucket,latin1),
-	StorageKey = <<Prefix/binary,":",UserKey>>,
-	StorageData = <<1,TimeStamp:64/integer,UserData/integer>>,
+	StorageKey = <<Prefix/binary,":",UserKey/binary>>,
+	StorageData = <<1,TimeStamp:64/integer,UserData/binary>>,
 	{StorageKey,StorageData}.
 
 

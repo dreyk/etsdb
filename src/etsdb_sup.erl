@@ -1,6 +1,5 @@
 %% -------------------------------------------------------------------
 %%
-%% etsdb_bucket
 %%
 %% Copyright (c) Dreyk.  All Rights Reserved.
 %%
@@ -18,27 +17,28 @@
 %% specific language governing permissions and limitations
 %% under the License.
 
-%% @doc etsdb_bucket behaviour
--module(etsdb_bucket).
+%% @doc Etsdb main supervisour.
+-module(etsdb_sup).
 -author('Alex G. <gunin@mail.mipt.ru>').
 
 
--export([behaviour_info/1]).
+-behaviour(supervisor).
 
 
--spec behaviour_info(atom()) -> 'undefined' | [{atom(), arity()}].
-behaviour_info(callbacks) ->
-    [
-     {api_version,0},
-     {serialize, 1},
-	 {unserialize,2},
-	 {key,1},
-	 {value,1},
-	 {n_val,0},
-	 {r_val,0},
-	 {quorum,0},
-	 {partition,2},
-	 {merge_conflict,3}
-	];
-behaviour_info(_Other) ->
-    undefined.
+-export([start_link/0]).
+
+
+-export([init/1]).
+
+
+start_link() ->
+    supervisor:start_link({local, ?MODULE}, ?MODULE, []).
+
+init(_Args) ->
+	%%Start riak_core vnode master.See docimentation on riak_core.
+    VMaster = {etsdb_vnode_master,
+                  {riak_core_vnode_master, start_link, [etsdb_vnode]},
+                  permanent, 5000, worker, [riak_core_vnode_master]},
+    { ok,
+        { {one_for_one, 5, 10},
+          [VMaster]}}.

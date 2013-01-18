@@ -26,8 +26,8 @@
 
 -export([
 	 start/2,
-	 stop/1
-        ]).
+	 stop/1,
+	 start_test/0]).
 
 
 -spec start(Type::term(), StartArgs::term())-> {ok,pid()} | ignore | {error,Error::term()}.
@@ -44,6 +44,7 @@ start(_Type, _StartArgs) ->
 	%%Start main supervisor
 	case etsdb_sup:start_link() of
 		{ok, Pid} ->
+			init_riak_core_services(),
 			{ok, Pid};
 		Error ->
 			Error
@@ -51,5 +52,29 @@ start(_Type, _StartArgs) ->
 
 stop(_State) ->
 	lager:info("Stopped  application etsdb.\n", []),
-    ok.
+	ok.
 
+%%Init riak_core, rigister etsdb in ring.
+init_riak_core_services()->
+	ok = riak_core:register(etsdb,[{vnode_module,etsdb_vnode}]).
+
+%%Start app in command line.
+%%You may use this fun for debug.
+start_test()->
+	erlang:spawn(fun()->start_test_inner() end).
+start_test_inner() ->
+	ok = application:start(sasl),
+	ok = application:start(os_mon),
+    ok = application:start(crypto),
+	ok = application:start(compiler),
+	ok = application:start(syntax_tools),
+	ok = application:start(lager),
+    ok = application:start(riak_sysmon),
+	ok = application:start(inets),
+	ok = application:start(public_key),
+	ok = application:start(ssl),
+	ok = application:start(xmerl),
+	ok = application:start(mochiweb),
+    ok = application:start(webmachine),
+	ok = application:start(riak_core),
+	ok = application:start(etsdb).

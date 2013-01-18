@@ -17,7 +17,7 @@
 %% specific language governing permissions and limitations
 %% under the License.
 
-%% @doc Simple implementation tsdb bucket for storing some data in {id,time} order
+%% @doc Simple implementation tsdb bucket for storing any data in {id,time} order
 -module(etsdb_tkb).
 
 
@@ -29,12 +29,16 @@
 		 r_val/0,
 		 quorum/0,
 		 merge_conflict/3,
-		 fold/2,partition/2]).
+		 fold/2,partition/1,serialize_key/1]).
 
 -behaviour(etsdb_bucket).
+-author('Alex G. <gunin@mail.mipt.ru>').
 
 api_version()->
 	"0.1".
+
+serialize_key({ID,Time})->
+	<<ID:64/integer,Time:64/integer>>.
 serialize({{ID,Time},Value})->
 	Key = <<ID:64/integer,Time:64/integer>>,
 	{Key,term_to_binary(Value)}.
@@ -47,9 +51,9 @@ r_val()->
 	3.
 quorum()->
 	2.
-partition({{_ID,Time},_Value},Count)->
-	Interval = round(60*60*1000/Count),
-	(Time rem Interval) +1.
+partition({{_ID,Time},_Value})->
+	Time div 36000000.
+
 merge_conflict(_K,V1,_V2)->
 	V1.
 

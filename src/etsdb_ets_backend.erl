@@ -18,12 +18,12 @@
 %% specific language governing permissions and limitations
 %% under the License.
 
-%% @doc etsdb_ets_backend it's ets table backend.
+%% @doc it's ets table backend.
 -module(etsdb_ets_backend).
 
 
 -export([init/2,
-		 save/2]).
+		 save/3,cell/4]).
 
 -define(ETS(I), list_to_atom("ets_tsdb_"++integer_to_list(I))).
 
@@ -34,7 +34,46 @@ init(Index,_Conf)->
 	{ok,#state{table=Tid}}.
 
 
-save(O,#state{table=Tab}=State)->
+save(B,{batch,UserObjects},State)->
+	Objects = [{{B,K},V}||{K,V}<-UserObjects],
+	put_obj(Objects, State);
+	
+save(B,{K,V},State)->
+	put_obj({{B,K},V}, State).
+	
+
+cell(Bucket,Filter,Key,#state{table=Tab})->
+	find_cell({Bucket,Key},Filter,Tab).
+				
+find_cell({Bucket,_}=Key,Filter,Tab)->
+	case get_obj(Key,Tab) of
+		{ok,not_found}->
+			case ets:next(Tab,Key) of
+				'$end_of_table'->
+					{ok,not_found};
+				{Bucket,UserKey}->
+					find_cell({Bucket,UserKey},Filter,Tab)
+			end;
+		{ok,{{_,UserKey},V}}->
+			case Bucket:fold_cell(UserKey,V,Filter) of
+				ok->
+					{ok,{UserKey,V}};
+				stop->
+					{ok,not_found};
+				_->
+					find_cell({Bucket,UserKey},Filter,Tab)
+			end
+	end.
+
+get_obj(Key,Tab)->
+	case ets:lookup(Tab,Key) of
+		[Object]->
+			{ok,Object};
+		_->			
+			{ok,not_found}
+	end.
+
+put_obj(O,#state{table=Tab}=State)->
 	Res = case catch ets:insert(Tab,O) of
 			  true->
 				  ok;
@@ -42,4 +81,3 @@ save(O,#state{table=Tab}=State)->
 				  {error,Else}
 		  end,
 	{Res,State}.
-

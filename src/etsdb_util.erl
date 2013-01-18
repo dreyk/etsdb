@@ -1,6 +1,5 @@
 %% -------------------------------------------------------------------
 %%
-%% etsdb_bucket
 %%
 %% Copyright (c) Dreyk.  All Rights Reserved.
 %%
@@ -17,28 +16,35 @@
 %% KIND, either express or implied.  See the License for the
 %% specific language governing permissions and limitations
 %% under the License.
-
-%% @doc etsdb_bucket behaviour
--module(etsdb_bucket).
--author('Alex G. <gunin@mail.mipt.ru>').
+-module(etsdb_util).
 
 
--export([behaviour_info/1]).
+-export([num_partiotions/0]).
+
+-export([reduce_orddict/2]).
+
+num_partiotions()->
+	{ok, Ring} = riak_core_ring_manager:get_my_ring(),
+	riak_core_ring:num_partitions(Ring).
 
 
--spec behaviour_info(atom()) -> 'undefined' | [{atom(), arity()}].
-behaviour_info(callbacks) ->
-    [
-     {api_version,0},
-     {serialize, 1},
-	 {unserialize,2},
-	 {key,1},
-	 {value,1},
-	 {n_val,0},
-	 {r_val,0},
-	 {quorum,0},
-	 {partition,2},
-	 {merge_conflict,3}
-	];
-behaviour_info(_Other) ->
-    undefined.
+reduce_orddict(_ReduceFun,[])->
+	[];
+reduce_orddict(ReduceFun,OrdDict)->
+	R = lists:foldl(fun({K,V},Acc)->
+							case Acc of
+								{K,OldV,Acc1}->
+									{K,ReduceFun(OldV,V),Acc1};
+								{M,OldV,Acc1}->
+									{K,V,[{M,OldV}|Acc1]};
+								undefined->
+									{K,V,[]}
+							end end,undefined,OrdDict),
+	case R of
+		undefined->
+			[];
+		{K,V,Acc}->
+			lists:reverse([{K,V}|Acc]);
+		_->
+			[]
+	end.

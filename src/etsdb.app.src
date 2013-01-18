@@ -1,0 +1,14 @@
+{application,etsdb,
+ [
+  {description, "Erlang time series storage"},
+  {vsn, git},
+  {registered, []},
+  {applications, [
+                  kernel,
+                  stdlib,
+                  lager,
+                  riak_core
+                 ]},
+  {mod, { etsdb_app, []}},
+  {env, []}
+ ]}.
