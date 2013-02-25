@@ -1,7 +1,7 @@
 -module(esensor_test).
 
 
--export([test/2]).
+-export([test/3]).
 
 test(SensorCount,BatchSize,SampleCount)->
 	Start = os:timestamp(),
@@ -22,7 +22,7 @@ start_sensors(0,_BatchSize,_SampleCount)->
 	ok;
 start_sensors(ID,BatchSize,SampleCount)->
 	Me = self(),
-	start_link(fun()->sensor(Me,ID,BatchSize,0,SampleCount) end),
+	erlang:spawn_link(fun()->sensor(Me,ID,BatchSize,0,SampleCount) end),
 	start_sensors(ID-1,BatchSize,SampleCount).
 
 
