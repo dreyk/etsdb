@@ -22,28 +22,22 @@
 
 
 
--export([serialize/1,
-		 unserialize/2,
+-export([
 		 api_version/0,
 		 w_val/0,
 		 r_val/0,
 		 quorum/0,
-		 merge_conflict/3,
-		 fold/2,partition/1,serialize_key/1]).
+		 make_partitions/1,
+		 serialize/2,
+		 scan_partiotions/2]).
 
 -behaviour(etsdb_bucket).
 -author('Alex G. <gunin@mail.mipt.ru>').
 
+-define(REGION_SIZE,36000000). %%One hour
+
 api_version()->
 	"0.1".
-
-serialize_key({ID,Time})->
-	<<ID:64/integer,Time:64/integer>>.
-serialize({{ID,Time},Value})->
-	Key = <<ID:64/integer,Time:64/integer>>,
-	{Key,term_to_binary(Value)}.
-unserialize(<<ID:64/integer,Time:64/integer>>,Value)->
-	{{ID,Time},binary_to_term(Value)}.
 
 w_val()->
 	3.
@@ -51,11 +45,32 @@ r_val()->
 	3.
 quorum()->
 	2.
-partition({{_ID,Time},_Value})->
-	Time div 36000000.
 
-merge_conflict(_K,V1,_V2)->
-	V1.
+make_partitions(Datas) when is_list(Datas)->
+	[{make_partition(Data),[Data]}||Data<-Datas];
+make_partitions(Data)->
+	[{make_partition(Data),[Data]}].
 
-fold(_K,_V)->
-	ok.
+make_partition({{ID,Time},_Value})->
+	TimeRegion = Time div ?REGION_SIZE,
+	partiotion_by_region(ID,TimeRegion).
+
+scan_partiotions({ID,Time1},{ID,Time2})->
+	FromTimeRegion = Time1 div ?REGION_SIZE,
+	ToTimeRegion = Time2 div ?REGION_SIZE,
+	lists:usort([partiotion_by_region(ID,TimeRegion)||TimeRegion<-lists:seq(FromTimeRegion,ToTimeRegion)]).
+
+serialize(Data,ForBackEnd) when is_list(Data)->
+	[serialize_internal(Data,ForBackEnd)||Data];
+serialize(Data,ForBackEnd)->
+	serialize_internal(Data,ForBackEnd).
+
+serialize_internal({{ID,Time},Value},etsdb_leveldb_backend)->
+	Value1 = term_to_binary(Value),
+	{<<ID:8/integer,Time:8/integer>>,<<1,Value1/binary>>};
+serialize_internal({{ID,Time},Value},_ForBackEnd)->
+	{{ID,Time},{1,Value}}.
+
+partiotion_by_region(ID,TimeRegion)->
+	Bin = <<ID:8/integer,TimeRegion:8/integer>>,
+	crypto:sha(Bin).

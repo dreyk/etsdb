@@ -34,12 +34,9 @@ init(Index,_Conf)->
 	{ok,#state{table=Tid}}.
 
 
-save(B,{batch,UserObjects},State)->
-	Objects = [{{B,K},V}||{K,V}<-UserObjects],
-	put_obj(Objects, State);
-	
-save(B,{K,V},State)->
-	put_obj({{B,K},V}, State).
+save(Bucket,Data,State)->
+	ToInsert = Bucket:serialize(Data,?MODULE),
+	put_obj(ToInsert, State).
 	
 
 cell(Bucket,Filter,Key,#state{table=Tab})->

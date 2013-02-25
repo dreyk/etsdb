@@ -57,7 +57,8 @@ put_external(ReqID,Preflist,Bucket,Data)->
 %%Init Callback.
 init([Index]) ->
     DeleteMode = app_helper:get_env(etsdb, delete_mode, 3000),
-	{BackEndModule,BackEndProps} = app_helper:get_env(etsdb, backend,{etsdb_ets_backend,[]}),
+	%%{BackEndModule,BackEndProps} = app_helper:get_env(etsdb, backend,{etsdb_ets_backend,[]}),
+	{BackEndModule,BackEndProps} = app_helper:get_env(etsdb, backend,{etsdb_leveldb_backend,[{data_root,"./data"}]}),
 	%%Start storage backend
 	case BackEndModule:init(Index,BackEndProps) of
 		{ok,Ref}->

@@ -30,7 +30,6 @@
 -record(state, {caller,preflist,partition,data,timeout,bucket,results,req_ref}).
 
 start_link(Caller,Partition,Bucket,Data,Timeout) ->
-	lager:debug("start put fsm ~p",[Bucket]),
     gen_fsm:start_link(?MODULE, [Caller,Partition,Bucket,Data,Timeout], []).
 
 init([Caller,Partition,Bucket,Data,Timeout]) ->
@@ -46,7 +45,6 @@ prepare(timeout, #state{caller=Caller,partition=Partition,bucket=Bucket}=StateDa
 			{next_state,execute,StateData#state{preflist=Preflist},0}
 	end.
 execute(timeout, #state{preflist=Preflist,data=Data,bucket=Bucket,timeout=Timeout}=StateData) ->
-	lager:debug("execute put ~p",[Data]),
 	Ref = make_ref(),
 	etsdb_vnode:put_external(Ref,Preflist,Bucket,Data),
     {next_state,wait_result, StateData#state{data=undefined,results=Bucket:quorum(),req_ref=Ref},Timeout}.
@@ -83,7 +81,6 @@ reply_to_caller({raw,Ref,To},Reply)->
 	To ! {Ref,Reply}.
 
 preflist(Partition,WVal)->
-	All = etsdb_apl:get_apl_ann(Partition,WVal),
-	[{P, FN}||{{P, FN},_}<-All].
+	etsdb_apl:get_apl(Partition,WVal).
 
 

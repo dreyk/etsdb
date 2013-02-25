@@ -16,20 +16,14 @@
 %% KIND, either express or implied.  See the License for the
 %% specific language governing permissions and limitations
 %% under the License.
+-module(etsdb_get).
 
+-export([scan/3]).
 
--module(etsdb_apl).
-
-%%
-%% Include files
-%%
-
-%%
-%% Exported Functions
-%%
--export([get_apl/2,get_apl/4]).
-
-get_apl(Partition, N)->
-	riak_core_apl:get_apl(Partition,N,etsdb).
-get_apl(Partition, N,Ring,UpNodes)->
-	riak_core_apl:get_apl(Partition,N,Ring,UpNodes).
+scan(Bucket,From,To)->
+	Partitions = Bucket:scan_partiotions(From,To),
+	{ok, Ring} = riak_core_ring_manager:get_my_ring(),
+	UpNodes = riak_core_node_watcher:nodes(etsdb),
+	RVal = Bucket:r_val(),
+	%%[etsdb_apl:get_apl(Partitions,RVal,Ring,UpNodes)].
+	ok.

@@ -30,15 +30,10 @@
 behaviour_info(callbacks) ->
     [
      {api_version,0},
-     {serialize, 1},
-	 {unserialize,2},
-	 {key,1},
-	 {value,1},
 	 {n_val,0},
 	 {r_val,0},
 	 {quorum,0},
-	 {partition,2},
-	 {merge_conflict,3}
+	 {make_partitions,1}
 	];
 behaviour_info(_Other) ->
     undefined.
