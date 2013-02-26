@@ -33,18 +33,18 @@ reduce_orddict(_ReduceFun,[])->
 reduce_orddict(ReduceFun,OrdDict)->
 	R = lists:foldl(fun({K,V},Acc)->
 							case Acc of
-								{K,OldV,Acc1}->
-									{K,ReduceFun(OldV,V),Acc1};
-								{M,OldV,Acc1}->
-									{K,V,[{M,OldV}|Acc1]};
+								{K,ValAcc,Acc1}->
+									{K,ReduceFun(V,ValAcc),Acc1};
+								{M,ValAcc,Acc1}->
+									{K,ReduceFun(V,'$start'),[{M,ReduceFun('$end',ValAcc)}|Acc1]};
 								undefined->
-									{K,V,[]}
+									{K,ReduceFun(V,'$start'),[]}
 							end end,undefined,OrdDict),
 	case R of
 		undefined->
 			[];
-		{K,V,Acc}->
-			lists:reverse([{K,V}|Acc]);
+		{K,ValAcc,Acc}->
+			lists:reverse([{K,ReduceFun('$end',ValAcc)}|Acc]);
 		_->
 			[]
 	end.

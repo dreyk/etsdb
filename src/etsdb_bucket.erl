@@ -30,7 +30,7 @@
 behaviour_info(callbacks) ->
     [
      {api_version,0},
-	 {n_val,0},
+	 {w_val,0},
 	 {r_val,0},
 	 {quorum,0},
 	 {make_partitions,1}

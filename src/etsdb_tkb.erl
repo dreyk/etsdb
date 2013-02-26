@@ -32,6 +32,7 @@
 		 scan_partiotions/2]).
 
 -behaviour(etsdb_bucket).
+
 -author('Alex G. <gunin@mail.mipt.ru>').
 
 -define(REGION_SIZE,36000000). %%One hour
@@ -47,9 +48,9 @@ quorum()->
 	2.
 
 make_partitions(Datas) when is_list(Datas)->
-	[{make_partition(Data),[Data]}||Data<-Datas];
+	[{make_partition(Data),Data}||Data<-Datas];
 make_partitions(Data)->
-	[{make_partition(Data),[Data]}].
+	[{make_partition(Data),Data}].
 
 make_partition({{ID,Time},_Value})->
 	TimeRegion = Time div ?REGION_SIZE,
@@ -72,5 +73,4 @@ serialize_internal({{ID,Time},Value},_ForBackEnd)->
 	{{ID,Time},{1,Value}}.
 
 partiotion_by_region(ID,TimeRegion)->
-	Bin = <<ID:8/integer,TimeRegion:8/integer>>,
-	crypto:sha(Bin).
+	<<ID:8/integer,TimeRegion:8/integer>>.

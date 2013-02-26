@@ -21,7 +21,7 @@
 
 -define(DEFAULT_TIMEOUT,60000).
 
--export([put/2,put/3]).
+-export([put/2,put/3,prepare_data/2]).
 
 
 put(Bucket,Data)->
@@ -41,7 +41,8 @@ do_put(_Bucket,[],_Timeout,Results)->
 do_put(Bucket,[{Partition,Data}|T],Timeout,Results)->
 	ReqRef = make_ref(),
 	Me = self(),
-	etsdb_put_fsm:start_link({raw,ReqRef,Me},Partition, Bucket, Data, Timeout),
+	PartionIdx = crypto:sha(Partition),
+	etsdb_put_fsm:start_link({raw,ReqRef,Me},PartionIdx, Bucket, Data, Timeout),
 	ResultsNew = case wait_for_results(ReqRef,Timeout) of
 		ok->
 			Results;
@@ -55,9 +56,12 @@ prepare_data(Bucket,Data)->
 	SortByPartition = lists:keysort(1,Partitioned),
 	etsdb_util:reduce_orddict(fun merge_user_data/2,SortByPartition).
 	
-
-merge_user_data(Data1,[Data2])->
-	[Data2|Data1].
+merge_user_data(Data,'$start')->
+	[Data];
+merge_user_data('$end',Acc)->
+	lists:reverse(Acc);
+merge_user_data(Data,Acc)->
+	[Data|Acc].
 
 wait_for_results(ReqRef,Timeout)->
 	receive 
