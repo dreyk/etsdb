@@ -39,6 +39,12 @@ init(_Args) ->
     VMaster = {etsdb_vnode_master,
                   {riak_core_vnode_master, start_link, [etsdb_vnode]},
                   permanent, 5000, worker, [riak_core_vnode_master]},
+	SocketServer = {etsdb_socket_sup,
+                  {etsdb_socket_sup, start_link, []},
+                  permanent, 5000, supervisor, [etsdb_socket_sup]},
+	SocketListener = {etsdb_socket_listener,
+                  {etsdb_socket_listener, start_link, []},
+                  permanent, 5000, worker, [etsdb_socket_listener]},
     { ok,
         { {one_for_one, 5, 10},
-          [VMaster]}}.
+          [VMaster,SocketServer,SocketListener]}}.

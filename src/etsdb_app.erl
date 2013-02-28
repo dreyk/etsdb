@@ -45,7 +45,7 @@ start(_Type, _StartArgs) ->
 	case etsdb_sup:start_link() of
 		{ok, Pid} ->
 			init_riak_core_services(),
-			ok = riak_api_pb_service:register([{etsdb_pb_client,10,13}]),
+			%%ok = riak_api_pb_service:register([{etsdb_pb_client,10,13}]),
 			{ok, Pid};
 		Error ->
 			Error

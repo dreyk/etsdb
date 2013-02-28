@@ -68,9 +68,8 @@ serialize(Data,ForBackEnd)->
 
 serialize_internal({{ID,Time},Value},etsdb_leveldb_backend)->
 	Value1 = term_to_binary(Value),
-	{<<ID:8/integer,Time:8/integer>>,<<1,Value1/binary>>};
+	{<<ID:64/integer,Time:64/integer>>,<<1,Value1/binary>>};
 serialize_internal({{ID,Time},Value},_ForBackEnd)->
 	{{ID,Time},{1,Value}}.
-
 partiotion_by_region(ID,TimeRegion)->
-	<<ID:8/integer,TimeRegion:8/integer>>.
+	<<ID:64/integer,TimeRegion:64/integer>>.
