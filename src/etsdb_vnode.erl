@@ -34,7 +34,11 @@
 		 terminate/2,
 		 delete/1,
 		 handle_coverage/4,
-		 is_empty/1,handle_exit/3,put_internal/3,put_external/4]).
+		 is_empty/1,
+		 handle_exit/3,
+		 put_internal/3,
+		 put_external/4,
+		 get_query/4]).
 
 -behaviour(riak_core_vnode).
 
@@ -54,6 +58,9 @@ put_internal(ReqID,Preflist,Data)->
 put_external(ReqID,Preflist,Bucket,Data)->
 	riak_core_vnode_master:command(Preflist,#etsdb_store_req_v1{value=Data,req_id=ReqID,bucket=Bucket},{fsm,undefined,self()},etsdb_vnode_master).
 
+get_query(ReqID,Preflist,Bucket,Query)->
+	riak_core_vnode_master:command(Preflist,#etsdb_get_query_req_v1{get_query=Query,req_id=ReqID,bucket=Bucket},{fsm,undefined,self()},etsdb_vnode_master).
+
 %%Init Callback.
 init([Index]) ->
     DeleteMode = app_helper:get_env(etsdb, delete_mode, 3000),
@@ -62,7 +69,7 @@ init([Index]) ->
 	%%Start storage backend
 	case BackEndModule:init(Index,BackEndProps) of
 		{ok,Ref}->
-    		{ok,#state{vnode_index=Index,delete_mod=DeleteMode,backend=BackEndModule,backend_ref=Ref}};
+    		{ok,#state{vnode_index=Index,delete_mod=DeleteMode,backend=BackEndModule,backend_ref=Ref},[{pool,etsdb_vnode_worker, 10, []}]};
 		{error,Else}->
 			{error,Else}
 	end.
@@ -73,7 +80,20 @@ handle_command(?ETSDB_STORE_REQ{bucket=Bucket,value=Value,req_id=ReqID}, Sender,
 			   #state{backend=BackEndModule,backend_ref=BackEndRef,vnode_index=Index}=State)->
 	{Result,NewBackEndRef} = BackEndModule:save(Bucket,Value,BackEndRef),
 	riak_core_vnode:reply(Sender, {w,Index,ReqID,Result}),
-	{noreply,State#state{backend_ref=NewBackEndRef}}.
+	{noreply,State#state{backend_ref=NewBackEndRef}};
+
+handle_command(?ETSDB_GET_QUERY_REQ{bucket=Bucket,get_query=Query,req_id=ReqID}, Sender,
+			   #state{backend=BackEndModule,backend_ref=BackEndRef,vnode_index=Index}=State)->
+	 case do_get_qyery(BackEndModule,BackEndRef,Bucket,Query) of
+        {async, AsyncWork} ->
+			Fun =
+				fun()->
+						{r,Index,ReqID,AsyncWork()} end,
+            {async, {invoke,Fun},Sender, State};
+        Result->
+			riak_core_vnode:reply(Sender, {r,Index,ReqID,Result}),
+            {noreply, State}
+    end.
 	
 
 handle_info(timeout,State)->
@@ -133,8 +153,11 @@ terminate(Reason,State)->
 	lager:info("etsdb vnode terminated in state ~p reason ~p",[State,Reason]),
     ok.
 
+%% ===================================================================
+%% Internal functions
+%% ===================================================================
 
-save_internal(Sender,Value,ReqID,#state{backend=BackEndModule,backend_ref=BackEndRef,vnode_index=Index}=State)->
-	{Result,NewBackEndRef} = BackEndModule:save(Value,BackEndRef),
-	riak_core_vnode:reply(Sender, {w,Index,ReqID,Result}),
-	{noreply,State#state{backend_ref=NewBackEndRef}}.
+do_get_qyery(BackEndModule,BackEndRef,Bucket,{scan,From,To})->
+	BackEndModule:scan(Bucket,From,To,[],BackEndRef);
+do_get_qyery(_BackEndModule,BackEndRef,_Bucket,_Query)->
+	{{error,bad_query},BackEndRef}.

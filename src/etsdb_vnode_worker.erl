@@ -16,30 +16,18 @@
 %% KIND, either express or implied.  See the License for the
 %% specific language governing permissions and limitations
 %% under the License.
--module(etsdb_get).
+-module(etsdb_vnode_worker).
 
--export([scan/3]).
+-behaviour(riak_core_vnode_worker).
 
--define(DEFAULT_TIMEOUT,60000).
+-export([init_worker/3,
+         handle_work/3]).
 
-scan(Bucket,From,To)->
-	Partitions = Bucket:scan_partiotions(From,To),
-	scan_partiotions(Bucket,From,To,Partitions,[]).
+-record(state, {index}).
 
-scan_partiotions(_Bucket,_From,_To,[],Acc)->
-	Acc;
-scan_partiotions(Bucket,From,To,[Partition|T],Acc)->
-	ReqRef = make_ref(),
-	Me = self(),
-	PartionIdx = crypto:sha(Partition),
-	etsdb_get_fsm:start_link({raw,ReqRef,Me},PartionIdx, Bucket, {scan,From,To},?DEFAULT_TIMEOUT),
-	Res = wait_for_results(ReqRef,?DEFAULT_TIMEOUT),
-	scan_partiotions(Bucket,From,To,T,[Res++Acc]).
+init_worker(VNodeIndex, _Args, _Props) ->
+    {ok, #state{index=VNodeIndex}}.
 
-wait_for_results(ReqRef,Timeout)->
-	receive 
-		{ReqRef,Res}->
-			Res
-	after Timeout->
-			{error,timeot}
-	end.
+%% @doc Perform the asynchronous fold operation.
+handle_work({invoke,Fun}, _Sender, State) ->
+    {reply,Fun(),State}.

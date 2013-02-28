@@ -31,7 +31,8 @@
                }).
 
 -export([init/2,
-		 save/3]).
+		 save/3,
+		 scan/5]).
 
 init(Partition, Config) ->
     %% Initialize random seed
@@ -50,7 +51,7 @@ init(Partition, Config) ->
             {error, Reason}
     end.
 
-save(Bucket,Data,#state{ref=Ref,write_opts=WriteOpts}=State) ->
+save(Bucket,Data,#state{data_root=Root,ref=Ref,write_opts=WriteOpts}=State) ->
     Updates = [{put,Key, Val}||{Key,Val}<-Bucket:serialize(Data,?MODULE)],
     case eleveldb:write(Ref, Updates,WriteOpts) of
         ok ->
@@ -58,6 +59,18 @@ save(Bucket,Data,#state{ref=Ref,write_opts=WriteOpts}=State) ->
         {error, Reason} ->
             {error, Reason, State}
     end.
+scan(Bucket,From,To,Acc,#state{data_root=Root,ref=Ref,fold_opts=FoldOpts})->
+	{StartIterate,Fun} = Bucket:scan_spec(From,To,?MODULE),
+	FoldFun = fun() ->
+                try
+					lager:debug("start fold ~p ~p",[Root,StartIterate]),
+                    eleveldb:fold(Ref,Fun,Acc, [{first_key,StartIterate} | FoldOpts])
+                catch
+                    {break, AccFinal} ->
+                        AccFinal
+                end
+        end,
+	{async,FoldFun}.
 
 init_state(DataRoot, Config) ->
     %% Get the data root directory
