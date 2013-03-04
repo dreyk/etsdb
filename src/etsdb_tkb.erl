@@ -88,7 +88,7 @@ scan_spec({ID,From},{ID,To},_BackEnd)->
 					  UserData->
 						  [UserData|Acc]
 				  end;
-			 (V, Acc)->
+			 (_V, Acc)->
 				  throw({break, lists:reverse(Acc)})
 		  end,
 	{StartKey,Fun}.
