@@ -50,10 +50,22 @@ execute(timeout, #state{preflist=Preflist,getquery=Query,bucket=Bucket,timeout=T
 
 
 wait_result({r,_Index,ReqID,Data},#state{caller=Caller,results=1,req_ref=ReqID,data=Acc}=StateData) ->
-	reply_to_caller(Caller,join_data(Data, Acc)),
+	Acc1 = case Data of
+			   {ok,L}->
+				   join_data(L, Acc);
+			   _->
+				   Acc
+		   end,
+	reply_to_caller(Caller,{ok,Acc1}),
     {stop,normal,StateData};
 wait_result({r,_Index,ReqID,Data},#state{results=Count,timeout=Timeout,req_ref=ReqID,data=Acc}=StateData) ->
-    {next_state,wait_result, StateData#state{results=Count-1,data=join_data(Data, Acc)},Timeout};
+	Acc1 = case Data of
+			   {ok,L}->
+				   join_data(L, Acc);
+			   _->
+				   Acc
+		   end,
+    {next_state,wait_result, StateData#state{results=Count-1,data=Acc1},Timeout};
 wait_result(timeout,#state{caller=Caller}=StateData) ->
 	reply_to_caller(Caller,{error,timeout}),
     {stop,normal,StateData}.

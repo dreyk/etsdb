@@ -21,7 +21,8 @@
 
 -export([num_partiotions/0]).
 
--export([reduce_orddict/2]).
+-export([reduce_orddict/2,
+		 make_error_response/1]).
 
 num_partiotions()->
 	{ok, Ring} = riak_core_ring_manager:get_my_ring(),
@@ -48,3 +49,8 @@ reduce_orddict(ReduceFun,OrdDict)->
 		_->
 			[]
 	end.
+
+make_error_response({error,_}=E)->
+	E;
+make_error_response(E)->
+	{error,E}.

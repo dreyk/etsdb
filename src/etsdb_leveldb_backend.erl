@@ -51,7 +51,7 @@ init(Partition, Config) ->
             {error, Reason}
     end.
 
-save(Bucket,Data,#state{data_root=Root,ref=Ref,write_opts=WriteOpts}=State) ->
+save(Bucket,Data,#state{ref=Ref,write_opts=WriteOpts}=State) ->
     Updates = [{put,Key, Val}||{Key,Val}<-Bucket:serialize(Data,?MODULE)],
     case eleveldb:write(Ref, Updates,WriteOpts) of
         ok ->
@@ -67,7 +67,7 @@ scan(Bucket,From,To,Acc,#state{data_root=Root,ref=Ref,fold_opts=FoldOpts})->
                     eleveldb:fold(Ref,Fun,Acc, [{first_key,StartIterate} | FoldOpts])
                 catch
                     {break, AccFinal} ->
-                        AccFinal
+                        {ok,AccFinal}
                 end
         end,
 	{async,FoldFun}.

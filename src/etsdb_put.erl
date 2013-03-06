@@ -23,21 +23,17 @@
 
 -export([put/2,put/3,prepare_data/2]).
 
+-include("etsdb_request.hrl").
 
 put(Bucket,Data)->
 	put(Bucket,Data,?DEFAULT_TIMEOUT).
 
 put(Bucket,Data,Timeout)->
 	PartitionedData = prepare_data(Bucket,Data),
-	do_put(Bucket,PartitionedData,Timeout,[]).
+	do_put(Bucket,PartitionedData,Timeout,#etsdb_store_res_v1{count=0,error_count=0,errors=[]}).
 
 do_put(_Bucket,[],_Timeout,Results)->
-	case Results of
-		[]->
-			ok;
-		_->
-			{errors,Results}
-	end;
+	Results;
 do_put(Bucket,[{Partition,Data}|T],Timeout,Results)->
 	ReqRef = make_ref(),
 	Me = self(),
@@ -45,9 +41,10 @@ do_put(Bucket,[{Partition,Data}|T],Timeout,Results)->
 	etsdb_put_fsm:start_link({raw,ReqRef,Me},PartionIdx, Bucket, Data, Timeout),
 	ResultsNew = case wait_for_results(ReqRef,Timeout) of
 		ok->
-			Results;
+			Results#etsdb_store_res_v1{count=1+Results#etsdb_store_res_v1.count};
 		Else->
-			[{Else,Data}|Results]
+			Results#etsdb_store_res_v1{error_count=1+Results#etsdb_store_res_v1.error_count,
+									   errors=[etsdb_util:make_error_response(Else)|Results#etsdb_store_res_v1.errors]}
 	end,
 	do_put(Bucket,T, Timeout,ResultsNew).
 
