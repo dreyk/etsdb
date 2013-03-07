@@ -149,6 +149,6 @@ make_store_result(#etsdb_store_res_v1{count=C,error_count=E,errors=Errors})->
 					 []->
 						 <<>>;
 					 _->
-						 io_lib:format("~p",Errors)
+						 list_to_binary(io_lib:format("~p",[Errors]))
 				 end,	
 	{64+size(ErrorsData),[<<C:32/integer,E:32/integer>>,ErrorsData]}.

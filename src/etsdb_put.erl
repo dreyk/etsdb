@@ -41,10 +41,9 @@ do_put(Bucket,[{Partition,Data}|T],Timeout,Results)->
 	etsdb_put_fsm:start_link({raw,ReqRef,Me},PartionIdx, Bucket, Data, Timeout),
 	ResultsNew = case wait_for_results(ReqRef,Timeout) of
 		ok->
-			Results#etsdb_store_res_v1{count=1+Results#etsdb_store_res_v1.count};
+			merge_store_result(length(Data),Results);
 		Else->
-			Results#etsdb_store_res_v1{error_count=1+Results#etsdb_store_res_v1.error_count,
-									   errors=[etsdb_util:make_error_response(Else)|Results#etsdb_store_res_v1.errors]}
+			merge_store_result(length(Data),etsdb_util:make_error_response(Else),Results)
 	end,
 	do_put(Bucket,T, Timeout,ResultsNew).
 
@@ -67,3 +66,12 @@ wait_for_results(ReqRef,Timeout)->
 	after Timeout->
 			{error,timeot}
 	end.
+
+merge_store_result(ErrCount,Error,#etsdb_store_res_v1{error_count=AE,errors=AEs}=Acc)->
+	Acc#etsdb_store_res_v1{error_count=ErrCount+AE,errors=[Error|AEs]}.
+merge_store_result(C,#etsdb_store_res_v1{count=AC}=Acc) when is_integer(C)->
+	Acc#etsdb_store_res_v1{count=C+AC};
+merge_store_result(#etsdb_store_res_v1{count=C,error_count=E,errors=Es},#etsdb_store_res_v1{count=AC,error_count=AE,errors=AEs}=Acc)->
+	Acc#etsdb_store_res_v1{count=C+AC,error_count=E+AE,errors=AEs++Es}.
+
+	

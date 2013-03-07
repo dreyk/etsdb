@@ -37,7 +37,8 @@ scan_partiotions(Bucket,From,To,[Partition|T],Acc,Timeout)->
 	etsdb_get_fsm:start_link({raw,ReqRef,Me},PartionIdx, Bucket, {scan,From,To},Timeout),
 	case wait_for_results(ReqRef,Timeout) of
 		{ok,Res} when is_list(Res)->
-			scan_partiotions(Bucket,From,To,T,[Res++Acc],Timeout);
+			lager:debug("scan return ~p for ~p ~p",[Res,From,To]),
+			scan_partiotions(Bucket,From,To,T,Res++Acc,Timeout);
 		Else->
 			etsdb_util:make_error_response(Else)
 	end.

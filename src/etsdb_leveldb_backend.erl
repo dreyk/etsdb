@@ -64,7 +64,7 @@ scan(Bucket,From,To,Acc,#state{data_root=Root,ref=Ref,fold_opts=FoldOpts})->
 	FoldFun = fun() ->
                 try
 					lager:debug("start fold ~p ~p",[Root,StartIterate]),
-                    eleveldb:fold(Ref,Fun,Acc, [{first_key,StartIterate} | FoldOpts])
+                    {ok,eleveldb:fold(Ref,Fun,Acc, [{first_key,StartIterate} | FoldOpts])}
                 catch
                     {break, AccFinal} ->
                         {ok,AccFinal}
