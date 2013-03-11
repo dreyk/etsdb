@@ -37,7 +37,7 @@ do_put(_Bucket,[],_Timeout,Results)->
 do_put(Bucket,[{Partition,Data}|T],Timeout,Results)->
 	ReqRef = make_ref(),
 	Me = self(),
-	PartionIdx = crypto:sha(Partition),
+	PartionIdx  = etsdb_util:hash_for_partition(Partition),
 	etsdb_put_fsm:start_link({raw,ReqRef,Me},PartionIdx, Bucket, Data, Timeout),
 	ResultsNew = case wait_for_results(ReqRef,client_wait_timeout(Timeout)) of
 		ok->
@@ -49,9 +49,21 @@ do_put(Bucket,[{Partition,Data}|T],Timeout,Results)->
 
 prepare_data(Bucket,Data)->
 	Partitioned = Bucket:make_partitions(Data),
+	%%DatasByUserPartition = join_partiotions(Partitioned),
+	{ok,Ring} = riak_core_ring_manager:get_my_ring(),
+	batch_partitions(Ring,Partitioned,[]).
+
+batch_partitions(_,[],Acc)->
+	join_partiotions(Acc);
+batch_partitions(Ring,[{Partition,Data}|T],Acc)->
+	Idx = crypto:sha(Partition),
+	VnodeIdx=riak_core_ring:responsible_index(Idx,Ring),
+	batch_partitions(Ring,T,[{VnodeIdx,Data}|Acc]).
+
+join_partiotions(Partitioned)->
 	SortByPartition = lists:keysort(1,Partitioned),
 	etsdb_util:reduce_orddict(fun merge_user_data/2,SortByPartition).
-	
+
 merge_user_data(Data,'$start')->
 	[Data];
 merge_user_data('$end',Acc)->

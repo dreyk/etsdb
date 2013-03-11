@@ -22,7 +22,8 @@
 -export([num_partiotions/0]).
 
 -export([reduce_orddict/2,
-		 make_error_response/1]).
+		 make_error_response/1,
+		 hash_for_partition/1]).
 
 num_partiotions()->
 	{ok, Ring} = riak_core_ring_manager:get_my_ring(),
@@ -55,5 +56,8 @@ make_error_response({error,_}=E)->
 make_error_response(E)->
 	{error,E}.
 
-
+hash_for_partition(0) ->
+    <<(trunc(math:pow(2,160))-1):160/integer>>;
+hash_for_partition(I) ->
+    <<(I-1):160/integer>>.
 	
