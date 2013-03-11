@@ -80,7 +80,6 @@ handle_command(?ETSDB_STORE_REQ{bucket=Bucket,value=Value,req_id=ReqID}, Sender,
 			   #state{backend=BackEndModule,backend_ref=BackEndRef,vnode_index=Index}=State)->
 	case BackEndModule:save(Bucket,Value,BackEndRef) of
 		{Result,NewBackEndRef}->
-			lager:debug("replu put ~p",[Result]),
 			riak_core_vnode:reply(Sender, {w,Index,ReqID,Result});
 		{error,Reason,NewBackEndRef}->
 			riak_core_vnode:reply(Sender, {w,Index,ReqID,{error,Reason}})
