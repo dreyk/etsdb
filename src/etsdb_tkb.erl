@@ -38,7 +38,7 @@
 
 -author('Alex G. <gunin@mail.mipt.ru>').
 
--define(REGION_SIZE,36000000). %%One hour
+-define(REGION_SIZE,86400000). %%One Day
 
 api_version()->
 	"0.1".
