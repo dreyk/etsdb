@@ -26,46 +26,44 @@
 -export([init/1, execute/2,wait_result/2,prepare/2, handle_event/3,
 	 handle_sync_event/4, handle_info/3, terminate/3, code_change/4]).
 
--record(state, {caller,preflist,partition,getquery,data,timeout,bucket,results,req_ref}).
+-record(results,{num_ok=0,num_fail=0,ok_quorum=0,fail_quorum=0,errors=[],data=[]}).
+-record(state, {caller,preflist,partition,getquery,timeout,bucket,results,req_ref}).
 
 start_link(Caller,Partition,Bucket,Query,Timeout) ->
     gen_fsm:start_link(?MODULE, [Caller,Partition,Bucket,Query,Timeout], []).
 
 init([Caller,Partition,Bucket,Query,Timeout]) ->
-    {ok,prepare, #state{caller=Caller,partition=Partition,getquery=Query,data=[],bucket=Bucket,timeout=Timeout},0}.
+    {ok,prepare, #state{caller=Caller,partition=Partition,getquery=Query,bucket=Bucket,timeout=Timeout},0}.
 
 
 prepare(timeout, #state{caller=Caller,partition=Partition,bucket=Bucket}=StateData) ->
+	ReadCount = Bucket:w_val(),
 	case preflist(Partition,Bucket:r_val()) of
 		{error,Error}->
 			reply_to_caller(Caller,{error,Error}),
 			{stop,normal,StateData};
+		Preflist when length(Preflist)==ReadCount->
+			NumOk = Bucket:r_quorum(),
+			NumFail = ReadCount-NumOk+1,
+			{next_state,execute,StateData#state{preflist=Preflist,results=#results{ok_quorum=NumOk,fail_quorum=NumFail}},0};
 		Preflist->
-			{next_state,execute,StateData#state{preflist=Preflist},0}
+			lager:error("Insufficient vnodes in preflist ~p must be ~p",[length(Preflist),ReadCount]),
+			reply_to_caller(Caller,{error,insufficient_vnodes}),
+			{stop,normal,StateData}
 	end.
 execute(timeout, #state{preflist=Preflist,getquery=Query,bucket=Bucket,timeout=Timeout}=StateData) ->
 	Ref = make_ref(),
 	etsdb_vnode:get_query(Ref,Preflist,Bucket,Query),
-    {next_state,wait_result, StateData#state{results=Bucket:quorum(),req_ref=Ref},Timeout}.
+    {next_state,wait_result, StateData#state{req_ref=Ref},Timeout}.
 
-
-wait_result({r,_Index,ReqID,Data},#state{caller=Caller,results=1,req_ref=ReqID,data=Acc}=StateData) ->
-	Acc1 = case Data of
-			   {ok,L}->
-				   join_data(L, Acc);
-			   _->
-				   Acc
-		   end,
-	reply_to_caller(Caller,{ok,Acc1}),
-    {stop,normal,StateData};
-wait_result({r,_Index,ReqID,Data},#state{results=Count,timeout=Timeout,req_ref=ReqID,data=Acc}=StateData) ->
-	Acc1 = case Data of
-			   {ok,L}->
-				   join_data(L, Acc);
-			   _->
-				   Acc
-		   end,
-    {next_state,wait_result, StateData#state{results=Count-1,data=Acc1},Timeout};
+wait_result({r,Index,ReqID,Res},#state{caller=Caller,results=Results,req_ref=ReqID,bucket=Bucket,timeout=Timeout}=StateData) ->
+	case add_result(Index,Bucket,Res, Results) of
+		#results{}=NewResult->
+			{next_state,wait_result, StateData#state{results=NewResult},Timeout};
+		ResultToReply->
+			 reply_to_caller(Caller,ResultToReply),
+			 {stop,normal,StateData}
+	end;
 wait_result(timeout,#state{caller=Caller}=StateData) ->
 	reply_to_caller(Caller,{error,timeout}),
     {stop,normal,StateData}.
@@ -95,7 +93,21 @@ preflist(Partition,WVal)->
 	etsdb_apl:get_apl(Partition,WVal).
 
 
-join_data(D,Acc) when is_list(D)->
-	Acc++D;
-join_data(_,Acc)->
-	Acc.
+add_result(_,{ok,L},Bucket,#results{num_ok=Count,ok_quorum=Quorum,data=Acc}=Results)->
+	Count1 = Count+1,
+	Acc1 = Bucket:join_scan(L,Acc),
+	if
+		Count1==Quorum->
+			{ok,Acc1};
+		true->
+			Results#results{num_ok=Count1,data=Acc1}
+	end;
+add_result(Index,Res,_Bucket,#results{num_fail=Count,fail_quorum=Quorum,errors=Errs}=Results)->
+	lager:error("Filed store to ~p - ~p",[Index,Res]),
+	Count1 = Count+1,
+	if
+		Count1==Quorum->
+			{error,fail};
+		true->
+			Results#results{num_ok=Count1,errors=[{Index,Res}|Errs]}
+	end.

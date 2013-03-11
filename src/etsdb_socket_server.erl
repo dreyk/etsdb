@@ -66,8 +66,8 @@ handle_info(Message, State) ->
     lager:error("Unrecognized message ~p", [Message]),
     {noreply, State}.
 
-terminate(_Reason, _State) ->
-    riak_api_stat:update(pbc_disconnect),
+terminate(Reason, _State) ->
+	lager:error("Terminating socket server ~p",[Reason]),
     ok.
 
 code_change(_OldVsn,State,_Extra) ->

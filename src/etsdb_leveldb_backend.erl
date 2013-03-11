@@ -59,15 +59,15 @@ save(Bucket,Data,#state{ref=Ref,write_opts=WriteOpts}=State) ->
         {error, Reason} ->
             {error, Reason, State}
     end.
-scan(Bucket,From,To,Acc,#state{data_root=Root,ref=Ref,fold_opts=FoldOpts})->
+scan(Bucket,From,To,Acc,#state{ref=Ref,fold_opts=FoldOpts})->
 	{StartIterate,Fun} = Bucket:scan_spec(From,To,?MODULE),
 	FoldFun = fun() ->
                 try
-					lager:debug("start fold ~p ~p",[Root,StartIterate]),
-                    {ok,eleveldb:fold(Ref,Fun,Acc, [{first_key,StartIterate} | FoldOpts])}
+					FoldResult = eleveldb:fold(Ref,Fun,Acc, [{first_key,StartIterate} | FoldOpts]),
+                    {ok,lists:reverse(FoldResult)}
                 catch
                     {break, AccFinal} ->
-                        {ok,AccFinal}
+                        {ok,lists:reverse(AccFinal)}
                 end
         end,
 	{async,FoldFun}.

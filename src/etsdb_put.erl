@@ -39,7 +39,7 @@ do_put(Bucket,[{Partition,Data}|T],Timeout,Results)->
 	Me = self(),
 	PartionIdx = crypto:sha(Partition),
 	etsdb_put_fsm:start_link({raw,ReqRef,Me},PartionIdx, Bucket, Data, Timeout),
-	ResultsNew = case wait_for_results(ReqRef,Timeout) of
+	ResultsNew = case wait_for_results(ReqRef,client_wait_timeout(Timeout)) of
 		ok->
 			merge_store_result(length(Data),Results);
 		Else->
@@ -64,7 +64,7 @@ wait_for_results(ReqRef,Timeout)->
 		{ReqRef,Res}->
 			Res
 	after Timeout->
-			{error,timeot}
+			{error,timeout}
 	end.
 
 merge_store_result(ErrCount,Error,#etsdb_store_res_v1{error_count=AE,errors=AEs}=Acc)->
@@ -74,4 +74,7 @@ merge_store_result(C,#etsdb_store_res_v1{count=AC}=Acc) when is_integer(C)->
 merge_store_result(#etsdb_store_res_v1{count=C,error_count=E,errors=Es},#etsdb_store_res_v1{count=AC,error_count=AE,errors=AEs}=Acc)->
 	Acc#etsdb_store_res_v1{count=C+AC,error_count=E+AE,errors=AEs++Es}.
 
-	
+
+%%Add 50ms to operation timeout
+client_wait_timeout(Timeout)->
+	Timeout + 50.

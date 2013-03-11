@@ -35,9 +35,8 @@ scan_partiotions(Bucket,From,To,[Partition|T],Acc,Timeout)->
 	Me = self(),
 	PartionIdx = crypto:sha(Partition),
 	etsdb_get_fsm:start_link({raw,ReqRef,Me},PartionIdx, Bucket, {scan,From,To},Timeout),
-	case wait_for_results(ReqRef,Timeout) of
+	case wait_for_results(ReqRef,client_wait_timeout(Timeout)) of
 		{ok,Res} when is_list(Res)->
-			lager:debug("scan return ~p for ~p ~p",[Res,From,To]),
 			scan_partiotions(Bucket,From,To,T,Res++Acc,Timeout);
 		Else->
 			etsdb_util:make_error_response(Else)
@@ -48,5 +47,9 @@ wait_for_results(ReqRef,Timeout)->
 		{ReqRef,Res}->
 			Res
 	after Timeout->
-			{error,timeot}
+			{error,timeout}
 	end.
+
+%%Add 50ms to operation timeout
+client_wait_timeout(Timeout)->
+	Timeout + 50.

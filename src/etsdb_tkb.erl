@@ -26,11 +26,13 @@
 		 api_version/0,
 		 w_val/0,
 		 r_val/0,
-		 quorum/0,
+		 w_quorum/0,
+		 r_quorum/0,
 		 make_partitions/1,
 		 serialize/2,
 		 scan_partiotions/2,
-		 scan_spec/3]).
+		 scan_spec/3,
+		 join_scan/2]).
 
 -behaviour(etsdb_bucket).
 
@@ -45,7 +47,9 @@ w_val()->
 	3.
 r_val()->
 	3.
-quorum()->
+w_quorum()->
+	2.
+r_quorum()->
 	2.
 
 make_partitions(Datas) when is_list(Datas)->
@@ -84,12 +88,12 @@ scan_spec({ID,From},{ID,To},_BackEnd)->
 					  skip->
 						  Acc;
 					  {error,not_object}->
-						  throw({break, lists:reverse(Acc)});
+						  throw({break, Acc});
 					  UserData->
 						  [UserData|Acc]
 				  end;
 			 (_V, Acc)->
-				  throw({break, lists:reverse(Acc)})
+				  throw({break,Acc})
 		  end,
 	{StartKey,Fun}.
 
@@ -99,3 +103,6 @@ unserialize_internal({<<ID:64/integer,Time:64/integer>>,<<Value/binary>>})->
 	{{ID,Time},binary_to_term(Value)};
 unserialize_internal(_)->
 	{error,not_object}.
+
+join_scan(A1,A2)->
+	orddict:merge(fun(_,V1,_)->V1 end,A1,A2).

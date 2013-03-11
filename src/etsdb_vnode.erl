@@ -78,8 +78,12 @@ init([Index]) ->
 %%Receive command to store data in user format.
 handle_command(?ETSDB_STORE_REQ{bucket=Bucket,value=Value,req_id=ReqID}, Sender,
 			   #state{backend=BackEndModule,backend_ref=BackEndRef,vnode_index=Index}=State)->
-	{Result,NewBackEndRef} = BackEndModule:save(Bucket,Value,BackEndRef),
-	riak_core_vnode:reply(Sender, {w,Index,ReqID,Result}),
+	case BackEndModule:save(Bucket,Value,BackEndRef) of
+		{Result,NewBackEndRef}->
+			riak_core_vnode:reply(Sender, {w,Index,ReqID,Result});
+		{error,Reason,NewBackEndRef}->
+			riak_core_vnode:reply(Sender, {w,Index,ReqID,{error,Reason}})
+	end,
 	{noreply,State#state{backend_ref=NewBackEndRef}};
 
 handle_command(?ETSDB_GET_QUERY_REQ{bucket=Bucket,get_query=Query,req_id=ReqID}, Sender,
