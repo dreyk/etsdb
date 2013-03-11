@@ -55,7 +55,7 @@ prepare(timeout, #state{caller=Caller,partition=Partition,bucket=Bucket}=StateDa
 execute(timeout, #state{preflist=Preflist,data=Data,bucket=Bucket,timeout=Timeout}=StateData) ->
 	Ref = make_ref(),
 	etsdb_vnode:put_external(Ref,Preflist,Bucket,Data),
-    {next_state,wait_result, StateData#state{data=undefined,results=Bucket:quorum(),req_ref=Ref},Timeout}.
+    {next_state,wait_result, StateData#state{data=undefined,req_ref=Ref},Timeout}.
 
 
 wait_result({w,Index,ReqID,Res},#state{caller=Caller,results=Results,req_ref=ReqID,timeout=Timeout}=StateData) ->
@@ -110,5 +110,5 @@ add_result(Index,Res,#results{num_fail=Count,fail_quorum=Quorum,errors=Errs}=Res
 		Count1==Quorum->
 			{error,fail};
 		true->
-			Results#results{num_ok=Count1,errors=[{Index,Res}|Errs]}
+			Results#results{num_fail=Count1,errors=[{Index,Res}|Errs]}
 	end.

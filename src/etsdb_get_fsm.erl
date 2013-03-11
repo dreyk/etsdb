@@ -57,7 +57,7 @@ execute(timeout, #state{preflist=Preflist,getquery=Query,bucket=Bucket,timeout=T
     {next_state,wait_result, StateData#state{req_ref=Ref},Timeout}.
 
 wait_result({r,Index,ReqID,Res},#state{caller=Caller,results=Results,req_ref=ReqID,bucket=Bucket,timeout=Timeout}=StateData) ->
-	case add_result(Index,Bucket,Res, Results) of
+	case add_result(Index,Res,Bucket,Results) of
 		#results{}=NewResult->
 			{next_state,wait_result, StateData#state{results=NewResult},Timeout};
 		ResultToReply->
@@ -103,11 +103,11 @@ add_result(_,{ok,L},Bucket,#results{num_ok=Count,ok_quorum=Quorum,data=Acc}=Resu
 			Results#results{num_ok=Count1,data=Acc1}
 	end;
 add_result(Index,Res,_Bucket,#results{num_fail=Count,fail_quorum=Quorum,errors=Errs}=Results)->
-	lager:error("Filed store to ~p - ~p",[Index,Res]),
+	lager:error("Filed scan to ~p - ~p",[Index,Res]),
 	Count1 = Count+1,
 	if
 		Count1==Quorum->
 			{error,fail};
 		true->
-			Results#results{num_ok=Count1,errors=[{Index,Res}|Errs]}
+			Results#results{num_fail=Count1,errors=[{Index,Res}|Errs]}
 	end.
