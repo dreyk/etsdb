@@ -33,7 +33,7 @@
 		 serialize/2,
 		 scan_partiotions/2,
 		 scan_spec/3,
-		 join_scan/2]).
+		 join_scan/2,test_fun/0,unserialize_result/1]).
 
 -behaviour(etsdb_bucket).
 
@@ -83,25 +83,28 @@ serialize_internal({{ID,Time},Value},_ForBackEnd)->
 partiotion_by_region(ID,TimeRegion)->
 	<<ID:64/integer,TimeRegion:64/integer>>.
 
+
 scan_spec({ID,From},{ID,To},_BackEnd)->
 	StartKey = <<?PREFIX,ID:64/integer,From:64/integer>>,
 	StopKey = <<?PREFIX,ID:64/integer,To:64/integer>>,
-	lager:info("scan ~p",[{ID,From,To}]),
 	Fun = fun
 			 ({K,_}=V, Acc) when K >= StartKey andalso K =< StopKey ->	  
-				  case unserialize_internal(V) of
-					  skip->
-						  Acc;
-					  {error,not_object}->
-						  throw({break, Acc});
-					  UserData->
-						  [UserData|Acc]
-				  end;
+				[V|Acc];
 			 (_V, Acc)->
 				  throw({break,Acc})
 		  end,
 	{StartKey,Fun}.
 
+unserialize_result(R)->
+	lists:foldr(fun(V,Acc)->
+						case unserialize_internal(V) of
+							skip->
+								Acc;
+							{error,not_object}->
+								Acc;
+							KV->
+								[KV|Acc]
+						end end,[],R).
 unserialize_internal({_,<<"deleted">>})->
 	skip;
 unserialize_internal({<<?PREFIX,ID:64/integer,Time:64/integer>>,<<Value/binary>>})->
@@ -111,3 +114,10 @@ unserialize_internal(_)->
 
 join_scan(A1,A2)->
 	orddict:merge(fun(_,V1,_)->V1 end,A1,A2).
+test_fun()->
+	fun
+	   (K) when K<1->
+			ok;
+	   (_)->
+		 error
+	end.

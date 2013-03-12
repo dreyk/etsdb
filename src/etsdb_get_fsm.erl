@@ -95,7 +95,8 @@ preflist(Partition,WVal)->
 
 add_result(_,{ok,L},Bucket,#results{num_ok=Count,ok_quorum=Quorum,data=Acc}=Results)->
 	Count1 = Count+1,
-	Acc1 = Bucket:join_scan(L,Acc),
+	L1 = Bucket:unserialize_result(L),
+	Acc1 = Bucket:join_scan(L1,Acc),
 	if
 		Count1==Quorum->
 			{ok,Acc1};
