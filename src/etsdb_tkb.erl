@@ -84,8 +84,8 @@ partiotion_by_region(ID,TimeRegion)->
 	<<ID:64/integer,TimeRegion:64/integer>>.
 
 scan_spec({ID,From},{ID,To},_BackEnd)->
-	StartKey = <<ID:64/integer,From:64/integer>>,
-	StopKey = <<ID:64/integer,To:64/integer>>,
+	StartKey = <<?PREFIX,ID:64/integer,From:64/integer>>,
+	StopKey = <<?PREFIX,ID:64/integer,To:64/integer>>,
 	lager:info("scan ~p",[{ID,From,To}]),
 	Fun = fun
 			 ({K,_}=V, Acc) when K >= StartKey andalso K =< StopKey ->	  
