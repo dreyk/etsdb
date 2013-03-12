@@ -62,6 +62,10 @@ handle_info({tcp, _Sock,MsgData}, State=#state{
    inet:setopts(Socket, [{active, once}]),
    {noreply, NewState,?AVTIVE_TIMEOUT};
 
+handle_info(timeout, State=#state{socket=Socket}) ->
+   gen_tcp:close(Socket),
+   {stop, normal, State};
+
 handle_info(Message, State) ->
     %% Throw out messages we don't care about, but log them
     lager:error("Unrecognized message ~p", [Message]),
