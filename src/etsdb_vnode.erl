@@ -78,7 +78,6 @@ init([Index]) ->
 %%Receive command to store data in user format.
 handle_command(?ETSDB_STORE_REQ{bucket=Bucket,value=Value,req_id=ReqID}, Sender,
 			   #state{backend=BackEndModule,backend_ref=BackEndRef,vnode_index=Index}=State)->
-	lager:info("try save to ~p count ~p",[Index,length(Value)]),
 	case BackEndModule:save(Bucket,Value,BackEndRef) of
 		{Result,NewBackEndRef}->
 			riak_core_vnode:reply(Sender, {w,Index,ReqID,Result});
