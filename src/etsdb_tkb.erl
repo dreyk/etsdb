@@ -23,6 +23,7 @@
 
 
 -export([
+		 sort/1,
 		 api_version/0,
 		 w_val/0,
 		 r_val/0,
@@ -40,6 +41,8 @@
 
 -define(REGION_SIZE,86400000). %%One Day
 
+-define(PREFIX,"etsdb_tkb"). %%One Day
+
 api_version()->
 	"0.1".
 
@@ -52,6 +55,8 @@ w_quorum()->
 r_quorum()->
 	2.
 
+sort(Data)->
+	lists:keysort(1,Data).
 make_partitions(Datas) when is_list(Datas)->
 	[{make_partition(Data),Data}||Data<-Datas];
 make_partitions(Data)->
@@ -72,8 +77,7 @@ serialize(Data,ForBackEnd)->
 	serialize_internal(Data,ForBackEnd).
 
 serialize_internal({{ID,Time},Value},etsdb_leveldb_backend)->
-	Value1 = term_to_binary(Value),
-	{<<ID:64/integer,Time:64/integer>>,<<Value1/binary>>};
+	{<<?PREFIX,ID:64/integer,Time:64/integer>>,<<Value/binary>>};
 serialize_internal({{ID,Time},Value},_ForBackEnd)->
 	{{ID,Time},Value}.
 partiotion_by_region(ID,TimeRegion)->
@@ -100,8 +104,8 @@ scan_spec({ID,From},{ID,To},_BackEnd)->
 
 unserialize_internal({_,<<"deleted">>})->
 	skip;
-unserialize_internal({<<ID:64/integer,Time:64/integer>>,<<Value/binary>>})->
-	{{ID,Time},binary_to_term(Value)};
+unserialize_internal({<<?PREFIX,ID:64/integer,Time:64/integer>>,<<Value/binary>>})->
+	{{ID,Time},Value};
 unserialize_internal(_)->
 	{error,not_object}.
 
