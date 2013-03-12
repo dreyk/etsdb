@@ -105,9 +105,9 @@ process_message(?ETSDB_CLIENT_PUT,BatchData,#state{socket=Sock}=State)->
 process_message(?ETSDB_CLIENT_SCAN,<<ID:64/integer,From:64/integer,To:64/integer>>,#state{socket=Sock}=State)->
 	Start = os:timestamp(),
 	case etsdb_get:scan(etsdb_tkb,{ID,From},{ID,To}) of
-		{ok,Data}->
+		{ok,_Data}->
 			lager:info("scan time ~p",[timer:now_diff(os:timestamp(),Start) div 1000]),
-			{Size,Data1} = make_scan_result(Data),
+			{Size,Data1} = make_scan_result([]),
 			lager:info("scan plus convert time ~p",[timer:now_diff(os:timestamp(),Start) div 1000]),
 			send_reply(Sock,?ETSDB_CLIENT_OK,Size,Data1);
 		{error,Else} ->
