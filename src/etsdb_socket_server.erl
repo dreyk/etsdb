@@ -105,9 +105,9 @@ process_message(?ETSDB_CLIENT_PUT,BatchData,#state{socket=Sock}=State)->
 process_message(?ETSDB_CLIENT_SCAN,<<ID:64/integer,From:64/integer,To:64/integer>>,#state{socket=Sock}=State)->
 	Start = os:timestamp(),
 	case etsdb_get:scan(etsdb_tkb,{ID,From},{ID,To}) of
-		{ok,_Data}->
+		{ok,Data}->
 			lager:info("scan time ~p",[timer:now_diff(os:timestamp(),Start) div 1000]),
-			{Size,Data1} = make_scan_result([]),
+			{Size,Data1} = make_scan_result(Data),
 			lager:info("scan plus convert time ~p",[timer:now_diff(os:timestamp(),Start) div 1000]),
 			send_reply(Sock,?ETSDB_CLIENT_OK,Size,Data1);
 		{error,Else} ->
@@ -142,7 +142,14 @@ send_reply(Sock,Code,Data)->
 
 send_reply(Sock,Code,Size,Data)->
 	PacketSize = 1+Size,
-	gen_tcp:send(Sock,[<<PacketSize:32/unsigned-integer,Code:8/integer>>,Data]).
+	case gen_tcp:send(Sock,[<<PacketSize:32/unsigned-integer,Code:8/integer>>,Data]) of
+		ok->
+			ok;
+		Else->
+			lager:error("cand send reply ~p",[Else]),
+			gen_tcp:close(Sock),
+			exit(bad_response)
+	end.
 
 make_scan_result(Res)->
 	make_scan_result(Res,0,[]).
@@ -150,8 +157,9 @@ make_scan_result([],Size,Acc)->
 	{Size,Acc};
 make_scan_result([{{ID,Time},Data}|T],Size,Acc)->
 	DataSize = size(Data),
-	Res = [<<DataSize:32/unsigned-integer,ID:64/integer,Time:64/integer>>,Data],
-	make_scan_result(T,Size+DataSize+20,[Res|Acc]).
+	make_scan_result(T,Size+DataSize+20,[<<DataSize:32/unsigned-integer,ID:64/integer,Time:64/integer>>,Data|Acc]);
+make_scan_result([_|T],Size,Acc)->
+	make_scan_result(T,Size,Acc).
 
 make_store_result(#etsdb_store_res_v1{count=C,error_count=E,errors=Errors})->
 	ErrorsData = case Errors of
