@@ -37,7 +37,7 @@ init([Caller,Partition,Bucket,Query,Timeout]) ->
 
 
 prepare(timeout, #state{caller=Caller,partition=Partition,bucket=Bucket}=StateData) ->
-	ReadCount = Bucket:w_val(),
+	ReadCount = Bucket:r_val(),
 	case preflist(Partition,Bucket:r_val()) of
 		{error,Error}->
 			reply_to_caller(Caller,{error,Error}),

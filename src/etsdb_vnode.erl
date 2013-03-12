@@ -88,6 +88,7 @@ handle_command(?ETSDB_STORE_REQ{bucket=Bucket,value=Value,req_id=ReqID}, Sender,
 
 handle_command(?ETSDB_GET_QUERY_REQ{bucket=Bucket,get_query=Query,req_id=ReqID}, Sender,
 			   #state{backend=BackEndModule,backend_ref=BackEndRef,vnode_index=Index}=State)->
+	lager:info("execute query ~p on ~p ref ~p",[Query,Index,ReqID]),
 	 case do_get_qyery(BackEndModule,BackEndRef,Bucket,Query) of
         {async, AsyncWork} ->
 			Fun =
