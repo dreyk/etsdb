@@ -26,6 +26,7 @@ scan(Bucket,From,To)->
 	scan(Bucket,From,To,?DEFAULT_TIMEOUT).
 scan(Bucket,From,To,Timeout)->
 	Partitions = Bucket:scan_partiotions(From,To),
+	lager:info("start scan ~p",[Partitions]),
 	scan_partiotions(Bucket,From,To,Partitions,[],Timeout).
 
 scan_partiotions(_Bucket,_From,_To,[],Acc,_Timeout)->
@@ -37,8 +38,9 @@ scan_partiotions(Bucket,From,To,[Partition|T],Acc,Timeout)->
 	etsdb_get_fsm:start_link({raw,ReqRef,Me},PartionIdx, Bucket, {scan,From,To},Timeout),
 	case wait_for_results(ReqRef,client_wait_timeout(Timeout)) of
 		{ok,Res} when is_list(Res)->
-			scan_partiotions(Bucket,From,To,T,Res++Acc,Timeout);
+			scan_partiotions(Bucket,From,To,T,Bucket:join_scan(Res,Acc),Timeout);
 		Else->
+			lager:error("Bad scan responce for ~p - ~p",[Partition,Else]),
 			etsdb_util:make_error_response(Else)
 	end.
 

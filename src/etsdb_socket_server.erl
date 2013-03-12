@@ -28,6 +28,7 @@
 -include("etsdb_request.hrl").
 
 -define(DEFAULT_TIMEOUT, 60000).
+-define(AVTIVE_TIMEOUT, 120000).
 
 -record(state, {
           socket
@@ -41,11 +42,11 @@ set_socket(Pid, Socket) ->
     gen_server:call(Pid, {set_socket, Socket}, infinity).
 
 init([]) ->
-    {ok, #state{}}.
+    {ok, #state{},?AVTIVE_TIMEOUT}.
 
 handle_call({set_socket, Socket}, _From, State) ->
     inet:setopts(Socket, [{active, once}, {packet, 4}]),
-    {reply, ok, State#state{socket = Socket}}.
+    {reply, ok, State#state{socket = Socket},?AVTIVE_TIMEOUT}.
 
 
 handle_cast(_Msg, State) ->
@@ -59,19 +60,19 @@ handle_info({tcp, _Sock,MsgData}, State=#state{
                                                socket=Socket}) ->
    NewState = process_message(MsgData, State),
    inet:setopts(Socket, [{active, once}]),
-   {noreply, NewState};
+   {noreply, NewState,?AVTIVE_TIMEOUT};
 
 handle_info(Message, State) ->
     %% Throw out messages we don't care about, but log them
     lager:error("Unrecognized message ~p", [Message]),
-    {noreply, State}.
+    {noreply, State,?AVTIVE_TIMEOUT}.
 
 terminate(Reason, _State) ->
 	lager:error("Terminating socket server ~p",[Reason]),
     ok.
 
 code_change(_OldVsn,State,_Extra) ->
-    {ok, State}.
+    {ok, State,?AVTIVE_TIMEOUT}.
 
 %% ===================================================================
 %% Internal functions
@@ -117,7 +118,7 @@ process_message(_Type,_BatchData,#state{socket=Sock}=State)->
 get_batch(<<>>,Acc)->
 	{ok,lists:reverse(Acc)};
 get_batch(<<DataSize:32/unsigned-integer,ID:64/integer,Time:64/integer,Data:DataSize/binary,Tail/binary>>,Acc)->
-	get_batch(Tail,[{{ID,Time},Data}|Acc]);
+	get_batch(Tail,[{{ID,Time},binary:copy(Data)}|Acc]);
 get_batch(_Else,_Acc)->
 	{error,bad_format}.
 
