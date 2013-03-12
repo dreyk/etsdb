@@ -29,7 +29,7 @@
 
 -define(DEFAULT_TIMEOUT, 60000).
 -define(AVTIVE_TIMEOUT, 120000).
-
+-define(REGION_SIZE,86400000). %%One Day
 -record(state, {
           socket
          }).
@@ -102,8 +102,11 @@ process_message(?ETSDB_CLIENT_PUT,BatchData,#state{socket=Sock}=State)->
 			send_reply(Sock,?ETSDB_CLIENT_UNKNOWN_DATA_FROMAT)
 	end,
 	State;
-process_message(?ETSDB_CLIENT_SCAN,<<ID:64/integer,From:64/integer,To:64/integer>>,#state{socket=Sock}=State)->
+process_message(?ETSDB_CLIENT_SCAN,<<ID:64/integer,From0:64/integer,To0:64/integer>>,#state{socket=Sock}=State) when From0 =< To0->
 	Start = os:timestamp(),
+	CurSys = etsdb_util:system_time(),
+	To = erlang:min(CurSys+?REGION_SIZE*2,To0),
+	From = erlang:max(From0,CurSys-?REGION_SIZE*365),
 	case etsdb_get:scan(etsdb_tkb,{ID,From},{ID,To}) of
 		{ok,Data}->
 			lager:info("scan time ~p",[timer:now_diff(os:timestamp(),Start) div 1000]),

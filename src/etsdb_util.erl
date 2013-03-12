@@ -23,7 +23,10 @@
 
 -export([reduce_orddict/2,
 		 make_error_response/1,
-		 hash_for_partition/1]).
+		 hash_for_partition/1,
+		 system_time/0,
+		 system_time/1,
+		 system_time/2]).
 
 num_partiotions()->
 	{ok, Ring} = riak_core_ring_manager:get_my_ring(),
@@ -61,3 +64,13 @@ hash_for_partition(0) ->
 hash_for_partition(I) ->
     <<(I-1):160/integer>>.
 	
+system_time()->
+	system_time(millisec).
+system_time(millisec)->
+	system_time(millisec,os:timestamp());
+system_time(sec)->
+	system_time(sec,os:timestamp()).
+system_time(millisec,{Mega,S,Micro})->
+	(Mega*1000000+S)*1000+(Micro div 1000);
+system_time(sec,{Mega,S,_})->
+	Mega*1000000+S.
