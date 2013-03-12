@@ -64,9 +64,11 @@ scan(Bucket,From,To,Acc,#state{ref=Ref,fold_opts=FoldOpts})->
 	FoldFun = fun() ->
                 try
 					FoldResult = eleveldb:fold(Ref,Fun,Acc, [{first_key,StartIterate} | FoldOpts]),
+					lager:info("scan length ~p",[length(FoldResult)]),
                     {ok,lists:reverse(FoldResult)}
                 catch
                     {break, AccFinal} ->
+						lager:info("scan length ~p",[length(AccFinal)]),
                         {ok,lists:reverse(AccFinal)}
                 end
         end,
