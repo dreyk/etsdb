@@ -77,19 +77,19 @@ init([Index]) ->
 
 
 handle_command({remove_expired,Bucket,{expired_records,{0,_Records}}}, _Sender,
-			   State)->
-	lager:info("nothing to delete from ~p",[Bucket]),
+			   #state{vnode_index=Index}=State)->
+	lager:info("nothing to delete from ~p on ~p",[Bucket,Index]),
 	riak_core_vnode:send_command_after(clear_period(Bucket),{clear_db,Bucket}),
 	{noreply,State};
 handle_command({remove_expired,Bucket,{expired_records,{Count,Records}}}, _Sender,
-			   #state{backend=BackEndModule,backend_ref=BackEndRef}=State)->
-	lager:info("prepare delete ~p records",[Count]),
+			   #state{backend=BackEndModule,backend_ref=BackEndRef,vnode_index=Index}=State)->
+	lager:info("prepare delete ~p records on ~p",[Count,Index]),
 	ToDelete = lists:usort(Records),
 	case BackEndModule:delete(Bucket,ToDelete,BackEndRef) of
 		{ok,NewBackEndRef}->
 			ok;
 		{error,Reason,NewBackEndRef}->
-			lager:error("Can't delete old records ~p",[Reason])
+			lager:error("Can't delete old records ~p on ~p",[Reason,Index])
 	end,
 	case Count of
 		{continue,_}->
@@ -98,12 +98,12 @@ handle_command({remove_expired,Bucket,{expired_records,{Count,Records}}}, _Sende
 			riak_core_vnode:send_command_after(clear_period(Bucket),{clear_db,Bucket})
 	end,
 	{noreply,State#state{backend_ref=NewBackEndRef}};
-handle_command({remove_expired,Bucket,Error}, _Sender,State)->
-	lager:error("Find expired task failed ~p",[Error]),
+handle_command({remove_expired,Bucket,Error}, _Sender,#state{vnode_index=Index}=State)->
+	lager:error("Find expired task failed ~p on ~p",[Error,Index]),
 	riak_core_vnode:send_command_after(clear_period(Bucket),{clear_db,Bucket}),
 	{noreply, State};
 handle_command({clear_db,Bucket}, Sender,
-			   #state{backend=BackEndModule,backend_ref=BackEndRef}=State)->
+			   #state{backend=BackEndModule,backend_ref=BackEndRef,vnode_index=Index}=State)->
 	Me = self(),
 	case BackEndModule:find_expired(Bucket,BackEndRef) of
 		{async, AsyncWork} ->
@@ -111,7 +111,7 @@ handle_command({clear_db,Bucket}, Sender,
 						  riak_core_vnode:send_command(Me,{remove_expired,Bucket,AsyncWork()}) end,
 			{async,{clear_db,Fun},Sender, State};
 		Else->
-			lager:error("Can't create clear db task ~p",[Else]),
+			lager:error("Can't create clear db task ~p on ~p",[Else,Index]),
 			{noreply, State}
 	end;
 
