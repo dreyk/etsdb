@@ -29,7 +29,7 @@
 
 -define(DEFAULT_TIMEOUT, 60000).
 -define(AVTIVE_TIMEOUT, 120000).
--define(REGION_SIZE,86400000). %%One Day
+
 -record(state, {
           socket
          }).
@@ -56,12 +56,16 @@ handle_info({tcp_closed, Socket}, State=#state{socket=Socket}) ->
     {stop, normal, State};
 handle_info({tcp_error, Socket, _Reason}, State=#state{socket=Socket}) ->
     {stop, normal, State};
-handle_info({tcp, _Sock,MsgData}, State=#state{
-                                               socket=Socket}) ->
-   NewState = process_message(MsgData, State),
-   inet:setopts(Socket, [{active, once}]),
-   {noreply, NewState,?AVTIVE_TIMEOUT};
-
+handle_info({tcp, _Sock,MsgData}, State=#state{socket=Socket}) ->
+   case process_message(MsgData,Socket) of
+	   ok->
+		   inet:setopts(Socket, [{active, once}]),
+		   {noreply,State,?AVTIVE_TIMEOUT};
+	   Else->
+		   lager:error("Error processing command ~p",[Else]),
+		   gen_tcp:close(Socket),
+		   {stop,normal,State}
+   end;
 handle_info(timeout, State=#state{socket=Socket}) ->
    gen_tcp:close(Socket),
    {stop, normal, State};
@@ -81,50 +85,44 @@ code_change(_OldVsn,State,_Extra) ->
 %% ===================================================================
 %% Internal functions
 %% ===================================================================
-process_message(<<Type:8/integer,RequestData/binary>>,State)->
-	process_message(Type,RequestData,State);
-process_message(_,#state{socket=Sock}=State)->
-	gen_tcp:send(Sock,<<1:8/integer>>),
-	State.
-process_message(?ETSDB_CLIENT_PUT,BatchData,#state{socket=Sock}=State)->
+process_message(<<Type:8/integer,RequestData/binary>>,Sock)->
+	process_message(Type,RequestData,Sock);
+process_message(_,Sock)->
+	send_reply(Sock,?ETSDB_CLIENT_UNKNOWN_REQ_TYPE),
+	{error,unknown_request_type}.
+process_message(?ETSDB_CLIENT_PUT,BatchData,Sock)->
 	case catch get_batch(BatchData,[]) of
 		{ok,ErlData}->
-			case etsdb_put:put(etsdb_tkb,ErlData,?DEFAULT_TIMEOUT) of
+			case etsdb_client_worker:invoke(etsdb_put,put,[etsdb_tkb,ErlData,?DEFAULT_TIMEOUT],block_timeout(?DEFAULT_TIMEOUT)) of
 				#etsdb_store_res_v1{}=Res->
 					{Size,ResData} = make_store_result(Res),
 					send_reply(Sock,?ETSDB_CLIENT_OK,Size,ResData);
 				Else ->
 					lager:error("error ~p",[Else]),
-					send_reply(Sock,?ETSDB_CLIENT_RUNTIME_ERROR,Else)
+					send_reply(Sock,?ETSDB_CLIENT_RUNTIME_ERROR,Else),
+					{error,put_runtime_error}
 			end;
 		Else->
 			lager:error("Bad request from client ~p",[Else]),
-			send_reply(Sock,?ETSDB_CLIENT_UNKNOWN_DATA_FROMAT)
-	end,
-	State;
-process_message(?ETSDB_CLIENT_SCAN,<<ID:64/integer,From0:64/integer,To0:64/integer>>,#state{socket=Sock}=State) when From0 =< To0->
-	Start = os:timestamp(),
-	CurSys = etsdb_util:system_time(),
-	To = erlang:min(CurSys+?REGION_SIZE*2,To0),
-	From = erlang:max(From0,CurSys-?REGION_SIZE*365),
-	case etsdb_get:scan(etsdb_tkb,{ID,From},{ID,To}) of
+			send_reply(Sock,?ETSDB_CLIENT_UNKNOWN_DATA_FROMAT),
+			{error,bad_put_request}
+	end;
+process_message(?ETSDB_CLIENT_SCAN,<<ID:64/integer,From:64/integer,To:64/integer>>,Sock)->
+	case etsdb_client_worker:invoke(etsdb_get,scan,[etsdb_tkb,{ID,From},{ID,To},?DEFAULT_TIMEOUT],block_timeout(?DEFAULT_TIMEOUT)) of
 		{ok,Data}->
-			lager:info("scan time ~p",[timer:now_diff(os:timestamp(),Start) div 1000]),
 			{Size,Data1} = make_scan_result(Data),
-			lager:info("scan plus convert time ~p",[timer:now_diff(os:timestamp(),Start) div 1000]),
 			send_reply(Sock,?ETSDB_CLIENT_OK,Size,Data1);
 		{error,Else} ->
-			lager:info("scan err time ~p",[timer:now_diff(os:timestamp(),Start) div 1000]),
 			lager:error("error ~p",[Else]),
-			send_reply(Sock,?ETSDB_CLIENT_RUNTIME_ERROR,Else)
-	end,
-	State;
-process_message(?ETSDB_CLIENT_SCAN,_,#state{socket=Sock}=State)->
+			send_reply(Sock,?ETSDB_CLIENT_RUNTIME_ERROR,Else),
+			{error,put_runtime_error}
+	end;
+process_message(?ETSDB_CLIENT_SCAN,_,Sock)->
 	send_reply(Sock,?ETSDB_CLIENT_UNKNOWN_DATA_FROMAT),
-	State;
-process_message(_Type,_BatchData,#state{socket=Sock}=State)->
+	{error,bad_scan_request};
+process_message(_Type,_BatchData,Sock)->
 	send_reply(Sock,?ETSDB_CLIENT_UNKNOWN_REQ_TYPE),
-	State.
+	{error,unknown_request_type}.
 
 get_batch(<<>>,Acc)->
 	{ok,lists:reverse(Acc)};
@@ -145,14 +143,7 @@ send_reply(Sock,Code,Data)->
 
 send_reply(Sock,Code,Size,Data)->
 	PacketSize = 1+Size,
-	case gen_tcp:send(Sock,[<<PacketSize:32/unsigned-integer,Code:8/integer>>,Data]) of
-		ok->
-			ok;
-		Else->
-			lager:error("cand send reply ~p",[Else]),
-			gen_tcp:close(Sock),
-			exit(bad_response)
-	end.
+	gen_tcp:send(Sock,[<<PacketSize:32/unsigned-integer,Code:8/integer>>,Data]).
 
 make_scan_result(Res)->
 	make_scan_result(Res,0,[]).
@@ -172,3 +163,11 @@ make_store_result(#etsdb_store_res_v1{count=C,error_count=E,errors=Errors})->
 						 list_to_binary(io_lib:format("~p",[Errors]))
 				 end,	
 	{64+size(ErrorsData),[<<C:32/integer,E:32/integer>>,ErrorsData]}.
+
+
+block_timeout(Timeout) when is_number(Timeout)->
+	Timeout+1000;
+block_timeout(Timeout)->
+	Timeout.
+
+	

@@ -66,10 +66,19 @@ make_partition({{ID,Time},_Value})->
 	TimeRegion = Time div ?REGION_SIZE,
 	partiotion_by_region(ID,TimeRegion).
 
-scan_partiotions({ID,Time1},{ID,Time2})->
+scan_partiotions({ID,Time1},{ID,Time2}) when Time1>Time2->
+	{{ID,Time1},{ID,Time1},[]};
+scan_partiotions({ID,OriginalTime1},{ID,OriginalTime2})->
+	Now = etsdb_util:system_time(),
+	Time1 = max(OriginalTime1,Now-?REGION_SIZE*365),
+	Time2 = min(OriginalTime2,Now+?REGION_SIZE*3),
 	FromTimeRegion = Time1 div ?REGION_SIZE,
 	ToTimeRegion = Time2 div ?REGION_SIZE,
-	lists:usort([partiotion_by_region(ID,TimeRegion)||TimeRegion<-lists:seq(FromTimeRegion,ToTimeRegion)]).
+	{{ID,Time1},
+	 {ID,Time2},
+	 lists:usort([partiotion_by_region(ID,TimeRegion)||TimeRegion<-lists:seq(FromTimeRegion,ToTimeRegion)])};
+scan_partiotions(From,To)->
+	{From,To,[]}.
 
 serialize(Datas,ForBackEnd) when is_list(Datas)->
 	[serialize_internal(Data,ForBackEnd)||Data<-Datas];

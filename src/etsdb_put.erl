@@ -75,7 +75,9 @@ merge_user_data(Data,Acc)->
 wait_for_results(ReqRef,Timeout)->
 	receive 
 		{ReqRef,Res}->
-			Res
+			Res;
+		{_OldReqRef,_OldRes}->
+			wait_for_results(ReqRef,Timeout)
 	after Timeout->
 			{error,timeout}
 	end.

@@ -25,9 +25,8 @@
 scan(Bucket,From,To)->
 	scan(Bucket,From,To,?DEFAULT_TIMEOUT).
 scan(Bucket,From,To,Timeout)->
-	Partitions = Bucket:scan_partiotions(From,To),
-	lager:info("start scan ~p",[Partitions]),
-	scan_partiotions(Bucket,From,To,Partitions,[],Timeout).
+	{From1,To1,Partitions} = Bucket:scan_partiotions(From,To),
+	scan_partiotions(Bucket,From1,To1,Partitions,[],Timeout).
 
 scan_partiotions(_Bucket,_From,_To,[],Acc,_Timeout)->
 	{ok,Acc};
