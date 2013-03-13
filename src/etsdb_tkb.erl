@@ -45,11 +45,11 @@
 
 -define(REGION_SIZE,86400000). %%One Day
 
--define(LIFE_TIME,?REGION_SIZE*5). %%Five days
+-define(LIFE_TIME,60*60*1000). %%One hour
 
--define(MAX_EXPIRED_COUNT,10).
+-define(MAX_EXPIRED_COUNT,10000).
 
--define(CLEAR_PERIOD,10*1000). %%10 sec
+-define(CLEAR_PERIOD,60*1000). %%One minutes
 
 -define(PREFIX,"etsdb_tkb").
 -define(PREFIX_REV,"etsdb_tkb_rev").
