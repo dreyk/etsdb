@@ -26,7 +26,8 @@
 		 hash_for_partition/1,
 		 system_time/0,
 		 system_time/1,
-		 system_time/2]).
+		 system_time/2,
+		 random_int/1]).
 
 num_partiotions()->
 	{ok, Ring} = riak_core_ring_manager:get_my_ring(),
@@ -74,3 +75,11 @@ system_time(millisec,{Mega,S,Micro})->
 	(Mega*1000000+S)*1000+(Micro div 1000);
 system_time(sec,{Mega,S,_})->
 	Mega*1000000+S.
+
+random_int(Limit) when is_integer(Limit) andalso Limit > 0 -> 
+        {_, Sec, Micro} = os:timestamp(), 
+        {Random, _} = random:uniform_s(Limit, {Micro rem 32768, Sec rem 32768, 0}), 
+        Random; 
+
+random_int(_) -> 
+        0.

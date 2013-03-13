@@ -51,8 +51,7 @@ prepare_data(Bucket,Data)->
 	Partitioned = Bucket:make_partitions(Data),
 	%%DatasByUserPartition = join_partiotions(Partitioned),
 	{ok,Ring} = riak_core_ring_manager:get_my_ring(),
-	BatchByPartitions = batch_partitions(Ring,Partitioned,[]),
-	[{P,Bucket:sort(V)}||{P,V}<-BatchByPartitions].
+	batch_partitions(Ring,Partitioned,[]).
 
 batch_partitions(_,[],Acc)->
 	join_partiotions(Acc);

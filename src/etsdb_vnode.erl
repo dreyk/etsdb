@@ -69,11 +69,51 @@ init([Index]) ->
 	%%Start storage backend
 	case BackEndModule:init(Index,BackEndProps) of
 		{ok,Ref}->
+			riak_core_vnode:send_command_after(clear_period(etsdb_tkb),{clear_db,etsdb_tkb}),
     		{ok,#state{vnode_index=Index,delete_mod=DeleteMode,backend=BackEndModule,backend_ref=Ref},[{pool,etsdb_vnode_worker, 10, []}]};
 		{error,Else}->
 			{error,Else}
 	end.
 
+
+handle_command({remove_expired,Bucket,{expired_records,{0,_Records}}}, _Sender,
+			   State)->
+	lager:info("nothing to delete from ~p",[Bucket]),
+	riak_core_vnode:send_command_after(clear_period(Bucket),{clear_db,Bucket}),
+	{noreply,State};
+handle_command({remove_expired,Bucket,{expired_records,{Count,Records}}}, _Sender,
+			   #state{backend=BackEndModule,backend_ref=BackEndRef}=State)->
+	lager:info("prepare delete ~p records",[Count]),
+	ToDelete = lists:usort(Records),
+	case BackEndModule:delete(Bucket,ToDelete,BackEndRef) of
+		{ok,NewBackEndRef}->
+			ok;
+		{error,Reason,NewBackEndRef}->
+			lager:error("Can't delete old records ~p",[Reason])
+	end,
+	case Count of
+		{continue,_}->
+			riak_core_vnode:send_command_after(1000,{clear_db,Bucket});
+		_->
+			riak_core_vnode:send_command_after(clear_period(Bucket),{clear_db,Bucket})
+	end,
+	{noreply,State#state{backend_ref=NewBackEndRef}};
+handle_command({remove_expired,Bucket,Error}, _Sender,State)->
+	lager:error("Find expired task failed ~p",[Error]),
+	riak_core_vnode:send_command_after(clear_period(Bucket),{clear_db,Bucket}),
+	{noreply, State};
+handle_command({clear_db,Bucket}, Sender,
+			   #state{backend=BackEndModule,backend_ref=BackEndRef}=State)->
+	Me = self(),
+	case BackEndModule:find_expired(Bucket,BackEndRef) of
+		{async, AsyncWork} ->
+			Fun = fun()->
+						  riak_core_vnode:send_command(Me,{remove_expired,Bucket,AsyncWork()}) end,
+			{async,{clear_db,Fun},Sender, State};
+		Else->
+			lager:error("Can't create clear db task ~p",[Else]),
+			{noreply, State}
+	end;
 
 %%Receive command to store data in user format.
 handle_command(?ETSDB_STORE_REQ{bucket=Bucket,value=Value,req_id=ReqID}, Sender,
@@ -134,12 +174,6 @@ delete(State)->
     {ok,State}.
 
 
-handle_coverage(#etsdb_get_cell_req_v1{bucket=Bucket,value=Value,filter=Filter}, _KeySpaces, _Sender,
-				#state{backend=BackEndModule,backend_ref=BackEndRef}=State)->
-   Key = Bucket:serialize_key(Value),
-   First = BackEndModule:cell(Bucket,Key,Filter,BackEndRef),
-   {reply,First,State};
-
 handle_coverage(_Request, _KeySpaces, _Sender, ModState)->
    {noreply,ModState}.
 
@@ -165,3 +199,7 @@ do_get_qyery(BackEndModule,BackEndRef,Bucket,{scan,From,To})->
 	BackEndModule:scan(Bucket,From,To,[],BackEndRef);
 do_get_qyery(_BackEndModule,BackEndRef,_Bucket,_Query)->
 	{{error,bad_query},BackEndRef}.
+
+clear_period(Bucket)->
+	I = Bucket:clear_period(),
+	I+etsdb_util:random_int(I).

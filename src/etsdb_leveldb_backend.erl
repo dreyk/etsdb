@@ -32,7 +32,9 @@
 
 -export([init/2,
 		 save/3,
-		 scan/5]).
+		 scan/5,
+		 find_expired/2,
+		 delete/3]).
 
 init(Partition, Config) ->
     %% Initialize random seed
@@ -51,14 +53,26 @@ init(Partition, Config) ->
             {error, Reason}
     end.
 
-save(Bucket,Data,#state{ref=Ref,write_opts=WriteOpts}=State) ->
-    Updates = [{put,Key, Val}||{Key,Val}<-Bucket:serialize(Data,?MODULE)],
+save(_Bucket,Data,#state{ref=Ref,write_opts=WriteOpts}=State) ->
+    Updates = [{put,Key, Val}||{Key,Val}<-Data],
     case eleveldb:write(Ref, Updates,WriteOpts) of
         ok ->
             {ok, State};
         {error, Reason} ->
             {error, Reason, State}
     end.
+find_expired(Bucket,#state{ref=Ref,fold_opts=FoldOpts})->
+	{StartIterate,Fun} = Bucket:expire_spec(?MODULE),
+	FoldFun = fun() ->
+                try
+					FoldResult = eleveldb:fold(Ref,Fun,{0,[]}, [{first_key,StartIterate} | FoldOpts]),
+                    {expired_records,FoldResult}
+                catch
+                    {break, AccFinal} ->
+						{expired_records,AccFinal}
+                end
+        end,
+	{async,FoldFun}.
 scan(Bucket,From,To,Acc,#state{ref=Ref,fold_opts=FoldOpts})->
 	{StartIterate,Fun} = Bucket:scan_spec(From,To,?MODULE),
 	FoldFun = fun() ->
@@ -72,6 +86,14 @@ scan(Bucket,From,To,Acc,#state{ref=Ref,fold_opts=FoldOpts})->
         end,
 	{async,FoldFun}.
 
+delete(_,Data,#state{ref=Ref,write_opts=WriteOpts}=State)->
+	Updates = [{delete, StorageKey}||StorageKey<-Data],
+	case eleveldb:write(Ref, Updates,WriteOpts) of
+        ok ->
+            {ok, State};
+        {error, Reason} ->
+            {error, Reason, State}
+    end.
 init_state(DataRoot, Config) ->
     %% Get the data root directory
     filelib:ensure_dir(filename:join(DataRoot, "dummy")),

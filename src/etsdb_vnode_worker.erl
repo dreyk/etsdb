@@ -30,4 +30,8 @@ init_worker(VNodeIndex, _Args, _Props) ->
 
 %% @doc Perform the asynchronous fold operation.
 handle_work({invoke,Fun}, _Sender, State) ->
-    {reply,Fun(),State}.
+    {reply,Fun(),State};
+
+handle_work({clear_db,Fun}, _Sender, State) ->
+	Fun(),
+    {noreply,State}.

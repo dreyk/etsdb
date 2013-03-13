@@ -54,7 +54,8 @@ prepare(timeout, #state{caller=Caller,partition=Partition,bucket=Bucket}=StateDa
 	end.
 execute(timeout, #state{preflist=Preflist,data=Data,bucket=Bucket,timeout=Timeout}=StateData) ->
 	Ref = make_ref(),
-	etsdb_vnode:put_external(Ref,Preflist,Bucket,Data),
+	PutBatch = Bucket:serialize(Data),
+	etsdb_vnode:put_external(Ref,Preflist,Bucket,PutBatch),
     {next_state,wait_result, StateData#state{data=undefined,req_ref=Ref},Timeout}.
 
 

@@ -33,7 +33,11 @@
 		 serialize/2,
 		 scan_partiotions/2,
 		 scan_spec/3,
-		 join_scan/2,test_fun/0,unserialize_result/1]).
+		 join_scan/2,
+		 unserialize_result/1,
+		 expire_spec/1,
+		 serialize/1,
+		 clear_period/0]).
 
 -behaviour(etsdb_bucket).
 
@@ -41,7 +45,16 @@
 
 -define(REGION_SIZE,86400000). %%One Day
 
--define(PREFIX,"etsdb_tkb"). %%One Day
+-define(LIFE_TIME,?REGION_SIZE*5). %%Five days
+
+-define(MAX_EXPIRED_COUNT,10).
+
+-define(CLEAR_PERIOD,10*1000). %%10 sec
+
+-define(PREFIX,"etsdb_tkb").
+-define(PREFIX_REV,"etsdb_tkb_rev").
+
+-define(USE_BACKEND,etsdb_leveldb_backend). %%One Day
 
 api_version()->
 	"0.1".
@@ -54,6 +67,9 @@ w_quorum()->
 	2.
 r_quorum()->
 	2.
+
+clear_period()->
+	?CLEAR_PERIOD.
 
 sort(Data)->
 	lists:keysort(1,Data).
@@ -80,18 +96,29 @@ scan_partiotions({ID,OriginalTime1},{ID,OriginalTime2})->
 scan_partiotions(From,To)->
 	{From,To,[]}.
 
+serialize(Datas)->
+	serialize(Datas,?USE_BACKEND).
+
 serialize(Datas,ForBackEnd) when is_list(Datas)->
-	[serialize_internal(Data,ForBackEnd)||Data<-Datas];
+	Batch = lists:foldl(fun(Data,Acc)->
+						Record = serialize_internal(Data,ForBackEnd),
+						RevRecord = serialize_internal_rev(Data,ForBackEnd),
+						[Record,RevRecord|Acc] end,[],Datas),
+	lists:keysort(1,Batch);
+	
 serialize(Data,ForBackEnd)->
-	serialize_internal(Data,ForBackEnd).
+	[serialize_internal(Data,ForBackEnd),serialize_internal_rev(Data,ForBackEnd)].
 
 serialize_internal({{ID,Time},Value},etsdb_leveldb_backend)->
 	{<<?PREFIX,ID:64/integer,Time:64/integer>>,<<Value/binary>>};
 serialize_internal({{ID,Time},Value},_ForBackEnd)->
-	{{ID,Time},Value}.
+	{{?PREFIX,ID,Time},Value}.
+serialize_internal_rev({{ID,Time},_Value},etsdb_leveldb_backend)->
+	{<<?PREFIX_REV,Time:64/integer,ID:64/integer>>,<<?PREFIX,ID:64/integer,Time:64/integer>>};
+serialize_internal_rev({{ID,Time},_Value},_ForBackEnd)->
+	{{?PREFIX_REV,Time,ID},{?PREFIX,ID,Time}}.
 partiotion_by_region(ID,TimeRegion)->
 	<<ID:64/integer,TimeRegion:64/integer>>.
-
 
 
 scan_spec({ID,From},{ID,To},_BackEnd)->
@@ -100,6 +127,23 @@ scan_spec({ID,From},{ID,To},_BackEnd)->
 	Fun = fun
 			 ({K,_}=V, Acc) when K >= StartKey andalso K =< StopKey ->	  
 				[V|Acc];
+			 (_V, Acc)->
+				  throw({break,Acc})
+		  end,
+	{StartKey,Fun}.
+
+expire_spec(_BackEnd)->
+	ExparationTime = etsdb_util:system_time()-?LIFE_TIME,
+	StartKey = <<?PREFIX_REV,0:64/integer,0:64/integer>>,
+	StopKey = <<?PREFIX_REV,ExparationTime:64/integer,0:64/integer>>,
+	Fun = fun
+			 ({K,V}, {Count,Acc}) when K >= StartKey andalso K =< StopKey->
+				  if
+					  Count<?MAX_EXPIRED_COUNT->
+							{Count+1,[K,V|Acc]};
+					  true->
+						  throw({break,{{continue,Count},Acc}})
+				  end;
 			 (_V, Acc)->
 				  throw({break,Acc})
 		  end,
