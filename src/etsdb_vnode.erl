@@ -69,12 +69,19 @@ init([Index]) ->
 	%%Start storage backend
 	case BackEndModule:init(Index,BackEndProps) of
 		{ok,Ref}->
-			riak_core_vnode:send_command_after(clear_period(etsdb_tkb),{clear_db,etsdb_tkb}),
+			RBuckets = app_helper:get_env(etsdb,registered_bucket),
+			start_clear_buckets(RBuckets),
     		{ok,#state{vnode_index=Index,delete_mod=DeleteMode,backend=BackEndModule,backend_ref=Ref},[{pool,etsdb_vnode_worker, 10, []}]};
 		{error,Else}->
 			{error,Else}
 	end.
 
+start_clear_buckets([B|Tail])->
+	lager:debug("start timer for ~p",[B]),
+	riak_core_vnode:send_command_after(clear_period(B),{clear_db,B}),
+	start_clear_buckets(Tail);
+start_clear_buckets([])->
+	ok.
 
 handle_command({remove_expired,Bucket,{expired_records,{0,_Records}}}, _Sender,
 			   #state{vnode_index=Index}=State)->

@@ -39,19 +39,26 @@ init(_Args) ->
 	VMaster = {etsdb_vnode_master,
 			   {riak_core_vnode_master, start_link, [etsdb_vnode]},
 			   permanent, 5000, worker, [riak_core_vnode_master]},
-	SocketServer = {etsdb_socket_sup,
-					{etsdb_socket_sup, start_link, []},
-					permanent, 5000, supervisor, [etsdb_socket_sup]},
-	SocketListener = {etsdb_socket_listener,
-					  {etsdb_socket_listener, start_link, []},
-					  permanent, 5000, worker, [etsdb_socket_listener]},
-	ClinetWorkerPoolArgs = [{name, {local,etsdb_client_worker}},
+	ClientWorkerPoolArgs = [{name, {local,etsdb_client_worker}},
 							{worker_module,etsdb_client_worker},
 							{size, 100},
 							{max_overflow,0}
 						   ],
-	ClinetWorkerPool = {etsdb_client_worker, {poolboy, start_link, [ClinetWorkerPoolArgs]},
+	ClirntWorkerPool = {etsdb_client_worker, {poolboy, start_link, [ClientWorkerPoolArgs]},
 						permanent, 5000, worker, [poolboy]},
+	All = [VMaster,ClirntWorkerPool],
+	All1 = case app_helper:get_env(etsdb,test_sock,false) of
+			   true->
+				   SocketServer = {etsdb_socket_sup,
+								   {etsdb_socket_sup, start_link, []},
+								   permanent, 5000, supervisor, [etsdb_socket_sup]},
+				   SocketListener = {etsdb_socket_listener,
+									 {etsdb_socket_listener, start_link, []},
+									 permanent, 5000, worker, [etsdb_socket_listener]},
+				   [SocketServer,SocketListener|All];
+			   _->
+				   All
+		   end,	
     { ok,
         { {one_for_one, 5, 10},
-          [VMaster,SocketServer,SocketListener,ClinetWorkerPool]}}.
+          All1}}.
