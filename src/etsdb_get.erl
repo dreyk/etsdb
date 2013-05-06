@@ -18,26 +18,32 @@
 %% under the License.
 -module(etsdb_get).
 
--export([scan/3,scan/4]).
+-export([scan/3,scan/4,scan_acc/4,scan_acc/5]).
 
 -define(DEFAULT_TIMEOUT,60000).
+
+scan_acc(Bucket,From,To,Acc)->
+	scan_acc(Bucket,From,To,Acc,?DEFAULT_TIMEOUT).
+scan_acc(Bucket,From,To,Acc,Timeout)->
+	{From1,To1,Partitions} = Bucket:scan_partiotions(From,To),
+	scan_partiotions(Bucket,From1,To1,Acc,Partitions,[],Timeout).
 
 scan(Bucket,From,To)->
 	scan(Bucket,From,To,?DEFAULT_TIMEOUT).
 scan(Bucket,From,To,Timeout)->
 	{From1,To1,Partitions} = Bucket:scan_partiotions(From,To),
-	scan_partiotions(Bucket,From1,To1,Partitions,[],Timeout).
+	scan_partiotions(Bucket,From1,To1,[],Partitions,[],Timeout).
 
-scan_partiotions(_Bucket,_From,_To,[],Acc,_Timeout)->
+scan_partiotions(_Bucket,_From,_To,_InitaialAcc,[],Acc,_Timeout)->
 	{ok,Acc};
-scan_partiotions(Bucket,From,To,[Partition|T],Acc,Timeout)->
+scan_partiotions(Bucket,From,To,InitaialAcc,[Partition|T],Acc,Timeout)->
 	ReqRef = make_ref(),
 	Me = self(),
 	PartionIdx = crypto:sha(Partition),
-	etsdb_get_fsm:start_link({raw,ReqRef,Me},PartionIdx, Bucket, {scan,From,To},Timeout),
+	etsdb_get_fsm:start_link({raw,ReqRef,Me},PartionIdx, Bucket, {scan,From,To,InitaialAcc},Timeout),
 	case wait_for_results(ReqRef,client_wait_timeout(Timeout)) of
 		{ok,Res} when is_list(Res)->
-			scan_partiotions(Bucket,From,To,T,Bucket:join_scan(Res,Acc),Timeout);
+			scan_partiotions(Bucket,From,To,InitaialAcc,T,Bucket:join_scan(Res,Acc),Timeout);
 		Else->
 			lager:error("Bad scan responce for ~p - ~p",[Partition,Else]),
 			etsdb_util:make_error_response(Else)
