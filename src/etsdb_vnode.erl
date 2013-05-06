@@ -204,6 +204,8 @@ terminate(Reason,State)->
 
 do_get_qyery(BackEndModule,BackEndRef,Bucket,{scan,From,To})->
 	BackEndModule:scan(Bucket,From,To,[],BackEndRef);
+do_get_qyery(BackEndModule,BackEndRef,Bucket,{scan,From,To,Acc})->
+	BackEndModule:scan(Bucket,From,To,Acc,BackEndRef);
 do_get_qyery(_BackEndModule,BackEndRef,_Bucket,_Query)->
 	{{error,bad_query},BackEndRef}.
 
