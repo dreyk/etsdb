@@ -193,7 +193,10 @@ handle_exit(_Pid,_Reason,State)->
 %% Terminate vnode process.
 %% Try terminate all child(user process) like supervisor
 %%------------------------------------------
-
+terminate(Reason,#state{backend=BackEndModule,backend_ref=BackEndRef}=State)->
+	lager:info("etsdb vnode terminated in state ~p reason ~p",[State,Reason]),
+	BackEndModule:stop(BackEndRef),
+	ok;
 terminate(Reason,State)->
 	lager:info("etsdb vnode terminated in state ~p reason ~p",[State,Reason]),
     ok.
