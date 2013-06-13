@@ -83,6 +83,9 @@ start_clear_buckets([B|Tail])->
 start_clear_buckets([])->
 	ok.
 
+handle_command({remove_expired,_,_}, _Sender,
+			   #state{vnode_index=undefined}=State)->
+	{noreply,State};
 handle_command({remove_expired,Bucket,{expired_records,{0,_Records}}}, _Sender,
 			   #state{vnode_index=Index}=State)->
 	lager:info("nothing to delete from ~p on ~p",[Bucket,Index]),
@@ -108,6 +111,10 @@ handle_command({remove_expired,Bucket,{expired_records,{Count,Records}}}, _Sende
 handle_command({remove_expired,Bucket,Error}, _Sender,#state{vnode_index=Index}=State)->
 	lager:error("Find expired task failed ~p on ~p",[Error,Index]),
 	riak_core_vnode:send_command_after(clear_period(Bucket),{clear_db,Bucket}),
+	{noreply, State};
+
+handle_command({clear_db,_}, _Sender,
+			   #state{vnode_index=undefined}=State)->
 	{noreply, State};
 handle_command({clear_db,Bucket}, Sender,
 			   #state{backend=BackEndModule,backend_ref=BackEndRef,vnode_index=Index}=State)->
@@ -177,8 +184,15 @@ handle_handoff_data(_Data, State) ->
 encode_handoff_item(ObjectName,ObjectValue) ->
     term_to_binary({ObjectName,ObjectValue}).
 
-delete(State)->
-    {ok,State}.
+delete(#state{backend=BackEndModule,backend_ref=BackEndRef}=State)->
+	case BackEndModule:drop(BackEndRef) of
+        {ok,NewBackEndRef} ->
+            ok;
+        {error, Reason, NewBackEndRef} ->
+            lager:error("Failed to drop ~p. Reason: ~p~n", [BackEndModule, Reason]),
+            ok
+    end,
+    {ok, State#state{backend_ref=NewBackEndRef,vnode_index=undefined}}.
 
 
 handle_coverage(_Request, _KeySpaces, _Sender, ModState)->

@@ -34,7 +34,7 @@
 		 save/3,
 		 scan/5,
 		 find_expired/2,
-		 delete/3,stop/1]).
+		 delete/3,stop/1,drop/1]).
 
 init(Partition, Config) ->
     %% Initialize random seed
@@ -61,6 +61,15 @@ stop(State) ->
             eleveldb:close(State#state.ref)
     end,
     ok.
+
+drop(State) ->
+    eleveldb:close(State#state.ref),
+    case eleveldb:destroy(State#state.data_root, []) of
+        ok ->
+            {ok, State#state{ref = undefined}};
+        {error, Reason} ->
+            {error, Reason, State}
+    end.
 
 save(_Bucket,Data,#state{ref=Ref,write_opts=WriteOpts}=State) ->
     Updates = [{put,Key, Val}||{Key,Val}<-Data],
