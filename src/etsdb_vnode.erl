@@ -215,7 +215,7 @@ handoff_finished(TargetNode, State) ->
     {ok, State}.
 
 handle_handoff_data(BinObj, #state{backend=BackEndModule,backend_ref=BackEndRef}=State) ->
-	Values = term_to_binary(BinObj),
+	Values = binary_to_term(BinObj),
 	lager:info("receive ~p objects on handoff",[length(Values)]),
    	case BackEndModule:save(BackEndModule,Values,BackEndRef) of
 		{Result,NewBackEndRef}->
