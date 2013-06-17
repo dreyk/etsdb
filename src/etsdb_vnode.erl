@@ -167,6 +167,7 @@ handle_command(?FOLD_REQ{foldfun=FoldFun, acc0=Acc0}, Sender,
 			   #state{backend=BackEndModule,backend_ref=BackEndRef}=State)->
 	WrapperFun = fun(K,V,{Count,WAcc,ExtrenalAcc})->
 						 if Count rem 10000 == 0 ->
+								lager:info("send ~p",[[{K,V}|WAcc]]),
 								ExtrenalAcc1 = FoldFun(<<Count:64/integer>>,[{K,V}|WAcc],ExtrenalAcc),
 								{Count+1,[],ExtrenalAcc1};
 							true->
@@ -182,6 +183,7 @@ handle_command(?FOLD_REQ{foldfun=FoldFun, acc0=Acc0}, Sender,
 							[]->
 								ExternalAcc;
 							_->
+								lager:info("send ~p",[Avalable]),
 								FoldFun(<<AllCount:64/integer>>,Avalable,ExternalAcc)
 						end
 				end,
@@ -216,7 +218,7 @@ handoff_finished(TargetNode, State) ->
 
 handle_handoff_data(BinObj, #state{backend=BackEndModule,backend_ref=BackEndRef}=State) ->
 	Values = binary_to_term(BinObj),
-	lager:info("receive ~p objects on handoff",[length(Values)]),
+	lager:info("receive ~p objects on handoff ~p",[length(Values),Values]),
    	case BackEndModule:save(BackEndModule,Values,BackEndRef) of
 		{Result,NewBackEndRef}->
 			{reply,Result, State#state{backend_ref=NewBackEndRef}};
