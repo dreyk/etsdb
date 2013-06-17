@@ -34,7 +34,7 @@
 		 save/3,
 		 scan/5,
 		 find_expired/2,
-		 delete/3,stop/1,drop/1]).
+		 delete/3,stop/1,drop/1,fold_objects/3,is_empty/1]).
 
 init(Partition, Config) ->
     %% Initialize random seed
@@ -103,6 +103,29 @@ scan(Bucket,From,To,Acc,#state{ref=Ref,fold_opts=FoldOpts})->
                 end
         end,
 	{async,FoldFun}.
+
+is_empty(#state{ref=Ref, read_opts=ReadOpts, write_opts=WriteOpts}) ->
+   eleveldb:is_empty(Ref).
+
+fold_objects(FoldObjectsFun, Acc, #state{fold_opts=FoldOpts,ref=Ref}) ->  
+	FoldFun = fun({StorageKey, Value}, Acc) ->
+					  try
+						  FoldObjectsFun(StorageKey, Value, Acc)
+					  catch
+						  stop_fold->
+						  		throw({break, Acc})
+						end
+				end,
+	ObjectFolder =
+		fun() ->
+			try
+				eleveldb:fold(Ref, FoldFun, Acc, FoldOpts)
+			catch
+				{break, AccFinal} ->
+					AccFinal
+			end
+		end,
+	{async, ObjectFolder}.
 
 delete(_,Data,#state{ref=Ref,write_opts=WriteOpts}=State)->
 	Updates = [{delete, StorageKey}||StorageKey<-Data],

@@ -43,6 +43,7 @@
 -behaviour(riak_core_vnode).
 
 -include("etsdb_request.hrl").
+-include_lib("riak_core/include/riak_core_vnode.hrl").
 
 %%vnode state
 -record(state,{delete_mod,vnode_index,backend,backend_ref}).
@@ -82,6 +83,16 @@ start_clear_buckets([B|Tail])->
 	start_clear_buckets(Tail);
 start_clear_buckets([])->
 	ok.
+
+handle_handoff_command(Req=?ETSDB_STORE_REQ{}, Sender, State) ->
+    {noreply, NewState} = handle_command(Req, Sender, State),
+    {forward, NewState};
+handle_handoff_command({remove_expired,_,_}, _Sender, State) ->
+    {noreply,State};
+handle_handoff_command({clear_db,_}, _Sender, State) ->
+    {noreply,State};
+handle_handoff_command(Req, Sender, State) ->
+    handle_command(Req, Sender, State).
 
 handle_command({remove_expired,_,_}, _Sender,
 			   #state{vnode_index=undefined}=State)->
@@ -151,7 +162,34 @@ handle_command(?ETSDB_GET_QUERY_REQ{bucket=Bucket,get_query=Query,req_id=ReqID},
         Result->
 			riak_core_vnode:reply(Sender, {r,Index,ReqID,Result}),
             {noreply, State}
-    end.
+    end;
+handle_command(?FOLD_REQ{foldfun=FoldFun, acc0=Acc0}, Sender,
+			   #state{backend=BackEndModule,backend_ref=BackEndRef}=State)->
+	WrapperFun = fun(K,V,{Count,WAcc,ExtrenalAcc})->
+						 if Count rem 10000 == 0 ->
+								ExtrenalAcc1 = FoldFun(<<Count:64/integer>>,[{K,V}|WAcc],ExtrenalAcc),
+								{Count+1,[],ExtrenalAcc1};
+							true->
+								{Count+1,[{K,V}|WAcc],ExtrenalAcc}
+						 end end,
+	case BackEndModule:fold_objects(WrapperFun,{1,[],Acc0},BackEndRef) of
+		{async, AsyncWork} ->
+			Fun =
+				fun()->
+						{AllCount,Avalable,ExternalAcc}=AsyncWork(),
+						lager:info("All readed count ~p",[AllCount]),
+						case Avalable of
+							[]->
+								ExternalAcc;
+							_->
+								FoldFun(<<AllCount:64/integer>>,Avalable,ExternalAcc)
+						end
+				end,
+			{async, {invoke,Fun},Sender, State};
+		Else->
+			riak_core_vnode:reply(Sender,{error,Else}),
+			{noreply, State}
+	end.
 	
 
 handle_info(timeout,State)->
@@ -162,9 +200,7 @@ handle_info(Info,State)->
     lager:debug("receive info ~p",[{Info,State}]),
     {ok,State}.
 
-handle_handoff_command(Message, _Sender, State) ->
-    lager:debug("receive handoff ~p",[Message]),
-    {noreply, State}.
+
 
 handoff_starting(TargetNode, State) ->
 	lager:debug("handof stating ~p",[TargetNode]),
@@ -178,15 +214,23 @@ handoff_finished(TargetNode, State) ->
 	lager:debug("handof finished ~p",[TargetNode]),
     {ok, State}.
 
-handle_handoff_data(_Data, State) ->
-    {reply, ok, State}.
+handle_handoff_data(BinObj, #state{backend=BackEndModule,backend_ref=BackEndRef}=State) ->
+	Values = term_to_binary(BinObj),
+	lager:info("receive ~p objects on handoff",[length(Values)]),
+   	case BackEndModule:save(BackEndModule,Values,BackEndRef) of
+		{Result,NewBackEndRef}->
+			{reply,Result, State#state{backend_ref=NewBackEndRef}};
+		{error,Reason,NewBackEndRef}->
+			{reply, {error, Reason}, State#state{backend_ref=NewBackEndRef}}
+	end.
 
-encode_handoff_item(ObjectName,ObjectValue) ->
-    term_to_binary({ObjectName,ObjectValue}).
+encode_handoff_item(_ObjectName,ObjectValue) ->
+    term_to_binary(ObjectValue).
 
-delete(#state{backend=BackEndModule,backend_ref=BackEndRef}=State)->
+delete(#state{backend=BackEndModule,backend_ref=BackEndRef,vnode_index=Index}=State)->
 	case BackEndModule:drop(BackEndRef) of
         {ok,NewBackEndRef} ->
+			lager:info("data dropped for ~p",[Index]),
             ok;
         {error, Reason, NewBackEndRef} ->
             lager:error("Failed to drop ~p. Reason: ~p~n", [BackEndModule, Reason]),
@@ -198,8 +242,9 @@ delete(#state{backend=BackEndModule,backend_ref=BackEndRef}=State)->
 handle_coverage(_Request, _KeySpaces, _Sender, ModState)->
    {noreply,ModState}.
 
-is_empty(State)->
-    {true,State}.
+is_empty(#state{backend=Mod,backend_ref=Ref}=State)->
+	IsEmpty = Mod:is_empty(Ref),
+    {IsEmpty,State}.
 
 handle_exit(_Pid,_Reason,State)->
 	{noreply,State}.
