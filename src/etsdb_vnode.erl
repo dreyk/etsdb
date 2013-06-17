@@ -99,12 +99,10 @@ handle_command({remove_expired,_,_}, _Sender,
 	{noreply,State};
 handle_command({remove_expired,Bucket,{expired_records,{0,_Records}}}, _Sender,
 			   #state{vnode_index=Index}=State)->
-	lager:info("nothing to delete from ~p on ~p",[Bucket,Index]),
 	riak_core_vnode:send_command_after(clear_period(Bucket),{clear_db,Bucket}),
 	{noreply,State};
 handle_command({remove_expired,Bucket,{expired_records,{Count,Records}}}, _Sender,
 			   #state{backend=BackEndModule,backend_ref=BackEndRef,vnode_index=Index}=State)->
-	lager:info("prepare delete ~p records on ~p",[Count,Index]),
 	ToDelete = lists:usort(Records),
 	case BackEndModule:delete(Bucket,ToDelete,BackEndRef) of
 		{ok,NewBackEndRef}->
@@ -167,7 +165,6 @@ handle_command(?FOLD_REQ{foldfun=FoldFun, acc0=Acc0}, Sender,
 			   #state{backend=BackEndModule,backend_ref=BackEndRef}=State)->
 	WrapperFun = fun(K,V,{Count,WAcc,ExtrenalAcc})->
 						 if Count rem 10000 == 0 ->
-								lager:info("send ~p",[[{K,V}|WAcc]]),
 								ExtrenalAcc1 = FoldFun(<<Count:64/integer>>,[{K,V}|WAcc],ExtrenalAcc),
 								{Count+1,[],ExtrenalAcc1};
 							true->
@@ -178,12 +175,10 @@ handle_command(?FOLD_REQ{foldfun=FoldFun, acc0=Acc0}, Sender,
 			Fun =
 				fun()->
 						{AllCount,Avalable,ExternalAcc}=AsyncWork(),
-						lager:info("All readed count ~p",[AllCount]),
 						case Avalable of
 							[]->
 								ExternalAcc;
 							_->
-								lager:info("send ~p",[Avalable]),
 								FoldFun(<<AllCount:64/integer>>,Avalable,ExternalAcc)
 						end
 				end,
@@ -218,7 +213,6 @@ handoff_finished(TargetNode, State) ->
 
 handle_handoff_data(BinObj, #state{backend=BackEndModule,backend_ref=BackEndRef}=State) ->
 	Values = binary_to_term(BinObj),
-	lager:info("receive ~p objects on handoff ~p",[length(Values),Values]),
    	case BackEndModule:save(BackEndModule,Values,BackEndRef) of
 		{Result,NewBackEndRef}->
 			{reply,Result, State#state{backend_ref=NewBackEndRef}};
