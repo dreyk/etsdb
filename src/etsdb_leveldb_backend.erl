@@ -104,7 +104,7 @@ scan(Bucket,From,To,Acc,#state{ref=Ref,fold_opts=FoldOpts})->
         end,
 	{async,FoldFun}.
 
-is_empty(#state{ref=Ref, read_opts=ReadOpts, write_opts=WriteOpts}) ->
+is_empty(#state{ref=Ref}) ->
    eleveldb:is_empty(Ref).
 
 fold_objects(FoldObjectsFun, Acc, #state{fold_opts=FoldOpts,ref=Ref}) ->  
