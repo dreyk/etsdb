@@ -163,10 +163,11 @@ handle_command(?ETSDB_GET_QUERY_REQ{bucket=Bucket,get_query=Query,req_id=ReqID},
     end;
 handle_command(?FOLD_REQ{foldfun=FoldFun, acc0=Acc0}, Sender,
 			   #state{backend=BackEndModule,backend_ref=BackEndRef}=State)->
+	Ref = make_ref(),
 	WrapperFun = fun(K,V,{Count,WAcc,ExtrenalAcc})->
-						 if Count rem 10000 == 0 ->
-								lager:info("start send handoff data ~p count",[Count]),
-								ExtrenalAcc1 = FoldFun(<<Count:64/integer>>,{Count,[{K,V}|WAcc]},ExtrenalAcc),
+						 if Count rem 100000 == 0 ->
+								lager:info("start send handoff data ~p count Ref ~p",[Count,Ref]),
+								ExtrenalAcc1 = FoldFun(<<Count:64/integer>>,{Ref,Count,[{K,V}|WAcc]},ExtrenalAcc),
 								{Count+1,[],ExtrenalAcc1};
 							true->
 								{Count+1,[{K,V}|WAcc],ExtrenalAcc}
@@ -181,8 +182,8 @@ handle_command(?FOLD_REQ{foldfun=FoldFun, acc0=Acc0}, Sender,
 								ExternalAcc;
 							_->
 								Length = length(Avalable),
-								lager:info("start send handoff data ~p count",[Length]),
-								FoldFun(<<AllCount:64/integer>>,{Length,Avalable},ExternalAcc)
+								lager:info("start send handoff data ~p count. Ref ~p",[Length,Ref]),
+								FoldFun(<<AllCount:64/integer>>,{Ref,Length,Avalable},ExternalAcc)
 						end
 				end,
 			{async, {invoke,Fun},Sender, State};
@@ -215,8 +216,8 @@ handoff_finished(TargetNode, State) ->
     {ok, State}.
 
 handle_handoff_data(BinObj, #state{backend=BackEndModule,backend_ref=BackEndRef}=State) ->
-	{Count,Values} = binary_to_term(BinObj),
-	lager:info("receive handoff data ~p count",[Count]),
+	{Ref,Count,Values} = binary_to_term(BinObj),
+	lager:info("receive handoff data ~p count. ref ~p",[Count,Ref]),
    	case BackEndModule:save(BackEndModule,Values,BackEndRef) of
 		{Result,NewBackEndRef}->
 			{reply,Result, State#state{backend_ref=NewBackEndRef}};
