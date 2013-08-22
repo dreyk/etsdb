@@ -161,12 +161,7 @@ handle_command(?ETSDB_GET_QUERY_REQ{bucket=Bucket,get_query=Query,req_id=ReqID},
 			riak_core_vnode:reply(Sender, {r,Index,ReqID,Result}),
             {noreply, State}
     end;
-handle_command(?FOLD_REQ{foldfun=FoldFun, acc0=Acc0}, Sender,State)->
-	Fun =
-		fun()->
-				FoldFun(<<"1">>,<<"1">>,Acc0)
-		end,
-	{async, {invoke,Fun},Sender, State};
+
 handle_command(?FOLD_REQ{foldfun=FoldFun, acc0=Acc0}, Sender,
 			   #state{backend=BackEndModule,backend_ref=BackEndRef,vnode_index=VIndex}=State)->
 	Ref = node(),
@@ -221,8 +216,6 @@ handoff_finished(TargetNode, State) ->
 	lager:debug("handof finished ~p",[TargetNode]),
     {ok, State}.
 
-handle_handoff_data(_BinObj,State) ->
-	{reply,ok, State};
 handle_handoff_data(BinObj, #state{backend=BackEndModule,backend_ref=BackEndRef,vnode_index=VIndex}=State) ->
 	{Ref,Count,Values} = binary_to_term(BinObj),
 	Im = node(),
