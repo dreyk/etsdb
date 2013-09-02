@@ -39,7 +39,7 @@ scan_partiotions(_Bucket,_From,_To,_InitaialAcc,[],Acc,_Timeout)->
 scan_partiotions(Bucket,From,To,InitaialAcc,[Partition|T],Acc,Timeout)->
 	ReqRef = make_ref(),
 	Me = self(),
-	PartionIdx = crypto:sha(Partition),
+	PartionIdx = crypto:hash(sha,Partition),
 	etsdb_get_fsm:start_link({raw,ReqRef,Me},PartionIdx, Bucket, {scan,From,To,InitaialAcc},Timeout),
 	case wait_for_results(ReqRef,client_wait_timeout(Timeout)) of
 		{ok,Res} when is_list(Res)->

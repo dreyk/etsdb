@@ -56,7 +56,7 @@ prepare_data(Bucket,Data)->
 batch_partitions(_,[],Acc)->
 	join_partiotions(Acc);
 batch_partitions(Ring,[{Partition,Data}|T],Acc)->
-	Idx = crypto:sha(Partition),
+	Idx = crypto:hash(sha,Partition),
 	VnodeIdx=riak_core_ring:responsible_index(Idx,Ring),
 	batch_partitions(Ring,T,[{VnodeIdx,Data}|Acc]).
 
