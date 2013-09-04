@@ -168,10 +168,3 @@ unserialize_internal(_)->
 
 join_scan(A1,A2)->
 	orddict:merge(fun(_,V1,_)->V1 end,A1,A2).
-test_fun()->
-	fun
-	   (K) when K<1->
-			ok;
-	   (_)->
-		 error
-	end.
