@@ -5,6 +5,8 @@
 
 -record(etsdb_store_res_v1,{count,error_count,errors}).
 
+-record(scan_it,{rgn_count,partition,rgn,from,to,start_rgn,end_rgn}).
+
 -define(ETSDB_STORE_REQ, #etsdb_store_req_v1).
 -define(ETSDB_GET_QUERY_REQ, #etsdb_get_query_req_v1).
 -define(ETSDB_INNERSTORE_REQ, #etsdb_innerstore_req_v1).

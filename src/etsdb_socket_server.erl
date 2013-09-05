@@ -93,7 +93,7 @@ process_message(_,Sock)->
 process_message(?ETSDB_CLIENT_PUT,BatchData,Sock)->
 	case catch get_batch(BatchData,[]) of
 		{ok,ErlData}->
-			case etsdb_client_worker:invoke(etsdb_put,put,[etsdb_tkb,ErlData,?DEFAULT_TIMEOUT],block_timeout(?DEFAULT_TIMEOUT)) of
+			case etsdb_put:put(etsdb_tkb,ErlData,?DEFAULT_TIMEOUT) of
 				#etsdb_store_res_v1{}=Res->
 					{Size,ResData} = make_store_result(Res),
 					send_reply(Sock,?ETSDB_CLIENT_OK,Size,ResData);
@@ -108,7 +108,7 @@ process_message(?ETSDB_CLIENT_PUT,BatchData,Sock)->
 			{error,bad_put_request}
 	end;
 process_message(?ETSDB_CLIENT_SCAN,<<ID:64/integer,From:64/integer,To:64/integer>>,Sock)->
-	case etsdb_client_worker:invoke(etsdb_get,scan,[etsdb_tkb,{ID,From},{ID,To},?DEFAULT_TIMEOUT],block_timeout(?DEFAULT_TIMEOUT)) of
+	case etsdb_get:scan(etsdb_tkb,{ID,From},{ID,To},?DEFAULT_TIMEOUT) of
 		{ok,Data}->
 			{Size,Data1} = make_scan_result(Data),
 			send_reply(Sock,?ETSDB_CLIENT_OK,Size,Data1);

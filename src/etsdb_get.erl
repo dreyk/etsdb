@@ -22,6 +22,8 @@
 
 -define(DEFAULT_TIMEOUT,60000).
 
+-include("etsdb_request.hrl").
+
 scan_acc(Bucket,From,To,Acc)->
 	scan_acc(Bucket,From,To,Acc,?DEFAULT_TIMEOUT).
 scan_acc(Bucket,From,To,Acc,Timeout)->
@@ -31,9 +33,27 @@ scan_acc(Bucket,From,To,Acc,Timeout)->
 scan(Bucket,From,To)->
 	scan(Bucket,From,To,?DEFAULT_TIMEOUT).
 scan(Bucket,From,To,Timeout)->
-	{From1,To1,Partitions} = Bucket:scan_partiotions(From,To),
-	scan_partiotions(Bucket,From1,To1,[],Partitions,[],Timeout).
-
+	case Bucket:scan_partiotions(From,To) of
+		{From1,To1,Partitions}->
+			scan_partiotions(Bucket,From1,To1,[],Partitions,[],Timeout);
+		emty->
+			{ok,[]};
+		#scan_it{rgn_count=0}->
+			{ok,[]};
+		#scan_it{}=It->
+			macan(Bucket,It,Timeout)
+	end.
+macan(Bucket,#scan_it{from=From,to=To}=It,Timeout)->
+	ReqRef = make_ref(),
+	Me = self(),
+	etsdb_mscan_fsm:start_link({raw,ReqRef,Me},Bucket,It, {scan,From,To,[]},Timeout),
+	case wait_for_results(ReqRef,client_wait_timeout(Timeout)) of
+		{ok,Res} when is_list(Res)->
+			{ok,Res};
+		Else->
+			lager:error("Bad scan responce for ~p",[Else]),
+			etsdb_util:make_error_response(Else)
+	end.
 scan_partiotions(_Bucket,_From,_To,_InitaialAcc,[],Acc,_Timeout)->
 	{ok,Acc};
 scan_partiotions(Bucket,From,To,InitaialAcc,[Partition|T],Acc,Timeout)->

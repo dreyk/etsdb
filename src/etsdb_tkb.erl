@@ -37,7 +37,8 @@
 		 unserialize_result/1,
 		 expire_spec/1,
 		 serialize/1,
-		 clear_period/0]).
+		 clear_period/0,
+		 scan_partiotions/1]).
 
 -behaviour(etsdb_bucket).
 
@@ -45,16 +46,18 @@
 
 -define(REGION_SIZE,86400000). %%One Day
 
--define(LIFE_TIME,5*60*60*1000). %%Five hour
+-define(LIFE_TIME,86400000*7). %%One week
 
 -define(MAX_EXPIRED_COUNT,10000).
 
 -define(CLEAR_PERIOD,300*1000). %%Five minutes
 
--define(PREFIX,"etsdb_tkb").
--define(PREFIX_REV,"etsdb_tkb_rev").
+-define(PREFIX,"pv").
+-define(PREFIX_REV,"pv_rev").
 
--define(USE_BACKEND,etsdb_leveldb_backend). %%One Day
+-define(USE_BACKEND,etsdb_leveldb_backend).
+
+-include("etsdb_request.hrl").
 
 api_version()->
 	"0.1".
@@ -82,19 +85,24 @@ make_partition({{ID,Time},_Value})->
 	TimeRegion = Time div ?REGION_SIZE,
 	partiotion_by_region(ID,TimeRegion).
 
+scan_partiotions(#scan_it{rgn = TimeRegion,end_rgn = TimeRegion})->
+	empty;
+scan_partiotions(#scan_it{rgn = TimeRegion,from={ID,_}}=It)->
+	Rgn = TimeRegion+1,
+	It#scan_it{rgn=Rgn,partition=partiotion_by_region(ID,Rgn)}.
 scan_partiotions({ID,Time1},{ID,Time2}) when Time1>Time2->
-	{{ID,Time1},{ID,Time1},[]};
-scan_partiotions({ID,OriginalTime1},{ID,OriginalTime2})->
+	empty;
+scan_partiotions({ID,Time1},{ID,Time2})->
 	Now = etsdb_util:system_time(),
-	Time1 = max(OriginalTime1,Now-?REGION_SIZE*365),
-	Time2 = min(OriginalTime2,Now+?REGION_SIZE*3),
-	FromTimeRegion = Time1 div ?REGION_SIZE,
+	From = max(Now-?LIFE_TIME,Time1),
+	FromTimeRegion = From div ?REGION_SIZE,
 	ToTimeRegion = Time2 div ?REGION_SIZE,
-	{{ID,Time1},
-	 {ID,Time2},
-	 lists:usort([partiotion_by_region(ID,TimeRegion)||TimeRegion<-lists:seq(FromTimeRegion,ToTimeRegion)])};
-scan_partiotions(From,To)->
-	{From,To,[]}.
+	#scan_it{rgn_count=ToTimeRegion-FromTimeRegion,
+			 rgn = FromTimeRegion,
+			 partition=partiotion_by_region(ID,FromTimeRegion),
+			 from={ID,From},to={ID,Time2},start_rgn=FromTimeRegion,end_rgn=ToTimeRegion};
+scan_partiotions(_From,_To)->
+		empty.
 
 serialize(Datas)->
 	serialize(Datas,?USE_BACKEND).
@@ -110,20 +118,23 @@ serialize(Data,ForBackEnd)->
 	[serialize_internal(Data,ForBackEnd),serialize_internal_rev(Data,ForBackEnd)].
 
 serialize_internal({{ID,Time},Value},etsdb_leveldb_backend)->
-	{<<?PREFIX,ID:64/integer,Time:64/integer>>,<<Value/binary>>};
+	Key = sext:encode({?PREFIX,ID,Time}),
+	{Key,<<Value/binary>>};
 serialize_internal({{ID,Time},Value},_ForBackEnd)->
 	{{?PREFIX,ID,Time},Value}.
 serialize_internal_rev({{ID,Time},_Value},etsdb_leveldb_backend)->
-	{<<?PREFIX_REV,Time:64/integer,ID:64/integer>>,<<?PREFIX,ID:64/integer,Time:64/integer>>};
+	Key = sext:encode({?PREFIX,ID,Time}),
+	IKey = sext:encode({?PREFIX_REV,Time,ID}),
+	{IKey,Key};
 serialize_internal_rev({{ID,Time},_Value},_ForBackEnd)->
 	{{?PREFIX_REV,Time,ID},{?PREFIX,ID,Time}}.
 partiotion_by_region(ID,TimeRegion)->
-	<<ID:64/integer,TimeRegion:64/integer>>.
+	<<ID/binary,TimeRegion:64/integer>>.
 
 
 scan_spec({ID,From},{ID,To},_BackEnd)->
-	StartKey = <<?PREFIX,ID:64/integer,From:64/integer>>,
-	StopKey = <<?PREFIX,ID:64/integer,To:64/integer>>,
+	StartKey = sext:encode({?PREFIX,ID,From}),
+	StopKey = sext:encode({?PREFIX,ID,To}),
 	Fun = fun
 			 ({K,_}=V, Acc) when K >= StartKey andalso K =< StopKey ->	  
 				[V|Acc];
@@ -134,8 +145,8 @@ scan_spec({ID,From},{ID,To},_BackEnd)->
 
 expire_spec(_BackEnd)->
 	ExparationTime = etsdb_util:system_time()-?LIFE_TIME,
-	StartKey = <<?PREFIX_REV,0:64/integer,0:64/integer>>,
-	StopKey = <<?PREFIX_REV,ExparationTime:64/integer,0:64/integer>>,
+	StartKey = sext:encode({?PREFIX_REV,0,<<>>}),
+	StopKey = sext:encode({?PREFIX_REV,ExparationTime,<<>>}),
 	Fun = fun
 			 ({K,V}, {Count,Acc}) when K >= StartKey andalso K =< StopKey->
 				  if
@@ -161,8 +172,13 @@ unserialize_result(R)->
 						end end,[],R).
 unserialize_internal({_,<<"deleted">>})->
 	skip;
-unserialize_internal({<<?PREFIX,ID:64/integer,Time:64/integer>>,<<Value/binary>>})->
-	{{ID,Time},Value};
+unserialize_internal({Key,Value})->
+	case sext:decode(Key) of
+		{?PREFIX,ID,Time}->
+			{{ID,Time},Value};
+		_->
+			{error,not_object}
+	end;
 unserialize_internal(_)->
 	{error,not_object}.
 
