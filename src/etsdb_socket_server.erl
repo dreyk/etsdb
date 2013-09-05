@@ -114,7 +114,7 @@ process_message(?ETSDB_CLIENT_SCAN,<<IDLength:8/integer,ID:IDLength/binary,From:
 			lager:info("scan res ~p",[Data]),
 			{Size,Data1} = make_scan_result(Data),
 			send_reply(Sock,?ETSDB_CLIENT_OK,Size,Data1);
-		{error,Else} ->
+		Else ->
 			lager:error("error ~p",[Else]),
 			send_reply(Sock,?ETSDB_CLIENT_RUNTIME_ERROR,Else),
 			{error,put_runtime_error}
