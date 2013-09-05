@@ -107,7 +107,7 @@ process_message(?ETSDB_CLIENT_PUT,BatchData,Sock)->
 			send_reply(Sock,?ETSDB_CLIENT_UNKNOWN_DATA_FROMAT),
 			{error,bad_put_request}
 	end;
-process_message(?ETSDB_CLIENT_SCAN,<<ID:64/integer,From:64/integer,To:64/integer>>,Sock)->
+process_message(?ETSDB_CLIENT_SCAN,<<IDLength:8/integer,ID:IDLength/binary,From:64/integer,IDLength:8/integer,ID:IDLength/binary,To:64/integer>>,Sock)->
 	case etsdb_get:scan(etsdb_tkb,{ID,From},{ID,To},?DEFAULT_TIMEOUT) of
 		{ok,Data}->
 			{Size,Data1} = make_scan_result(Data),
@@ -151,7 +151,7 @@ make_scan_result([],Size,Acc)->
 	{Size,Acc};
 make_scan_result([{{ID,Time},Data}|T],Size,Acc)->
 	DataSize = size(Data),
-	make_scan_result(T,Size+DataSize+20,[<<DataSize:32/unsigned-integer,ID:64/integer,Time:64/integer>>,Data|Acc]);
+	make_scan_result(T,Size+DataSize+20,[<<DataSize:32/unsigned-integer,(size(ID)):8/integer,ID,Time:64/integer>>,Data|Acc]);
 make_scan_result([_|T],Size,Acc)->
 	make_scan_result(T,Size,Acc).
 
