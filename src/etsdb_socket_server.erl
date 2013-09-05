@@ -107,11 +107,23 @@ process_message(?ETSDB_CLIENT_PUT,BatchData,Sock)->
 			send_reply(Sock,?ETSDB_CLIENT_UNKNOWN_DATA_FROMAT),
 			{error,bad_put_request}
 	end;
-process_message(?ETSDB_CLIENT_SCAN,<<IDLength:8/integer,ID:IDLength/binary,From:64/integer,IDLength1:8/integer,_ID1:IDLength1/binary,To:64/integer>>,Sock)->
-	lager:info("scan ~p",[{ID,From,To}]),
+process_message(?ETSDB_CLIENT_SCAN,<<IDTLength1:8/integer,IDT1:IDTLength1/binary,IDTLength2:8/integer,IDT2:IDTLength2/binary>>,Sock)->
+	IDLength1 = IDTLength1-8,
+	<<ID:IDLength1/binary,From:64/integer>>=IDT1,
+	IDLength2 = IDTLength2-8,
+	<<ID:IDLength2/binary,To:64/integer>>=IDT2,
 	case catch etsdb_get:scan(etsdb_tkb,{ID,From},{ID,To},?DEFAULT_TIMEOUT) of
 		{ok,Data}->
-			lager:info("scan res ~p",[Data]),
+			{Size,Data1} = make_scan_result(Data),
+			send_reply(Sock,?ETSDB_CLIENT_OK,Size,Data1);
+		Else ->
+			lager:error("error ~p",[Else]),
+			send_reply(Sock,?ETSDB_CLIENT_RUNTIME_ERROR,Else),
+			{error,put_runtime_error}
+	end;
+process_message(?ETSDB_CLIENT_SCAN,<<IDLength:8/integer,ID:IDLength/binary,From:64/integer,To:64/integer>>,Sock)->
+	case catch etsdb_get:scan(etsdb_tkb,{ID,From},{ID,To},?DEFAULT_TIMEOUT) of
+		{ok,Data}->
 			{Size,Data1} = make_scan_result(Data),
 			send_reply(Sock,?ETSDB_CLIENT_OK,Size,Data1);
 		Else ->
@@ -130,7 +142,9 @@ process_message(Type,BatchData,Sock)->
 
 get_batch(<<>>,Acc)->
 	{ok,lists:reverse(Acc)};
-get_batch(<<DataSize:32/unsigned-integer,IDLength:8/integer,ID:IDLength/binary,Time:64/integer,Data:DataSize/binary,Tail/binary>>,Acc)->
+get_batch(<<IDTLength:8/integer,IDTime:IDTLength/binary,DataSize:32/unsigned-integer,Data:DataSize/binary,Tail/binary>>,Acc)->
+	IDLength = IDTLength-8,
+	<<ID:IDLength/binary,Time:64/integer>>=IDTime,
 	get_batch(Tail,[{{ID,Time},binary:copy(Data)}|Acc]);
 get_batch(_Else,_Acc)->
 	{error,bad_format}.
@@ -155,8 +169,8 @@ make_scan_result([],Size,Acc)->
 	{Size,Acc};
 make_scan_result([{{ID,Time},Data}|T],Size,Acc)->
 	DataSize = size(Data),
-	IDSize = size(ID),
-	make_scan_result(T,Size+DataSize+8+4+1+IDSize,[<<DataSize:32/unsigned-integer,IDSize:8/integer,ID,Time:64/integer>>,Data|Acc]);
+	IDSize = size(ID)+8,
+	make_scan_result(T,Size+1+4+IDSize+DataSize,[<<IDSize:8/integer,ID/binary,Time:64/integer,DataSize:32/unsigned-integer>>,Data|Acc]);
 make_scan_result([_|T],Size,Acc)->
 	make_scan_result(T,Size,Acc).
 

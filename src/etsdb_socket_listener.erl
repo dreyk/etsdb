@@ -31,7 +31,7 @@
 
 start_link() ->
 	IpAddr = app_helper:get_env(etsdb,plain_ip,"0.0.0.0"),
-	PortNum = app_helper:get_env(etsdb,plain_port,5055),
+	PortNum = app_helper:get_env(etsdb,plain_port,6011),
     gen_nb_server:start_link(?MODULE, IpAddr, PortNum, [PortNum]).
 
 init([PortNum]) ->

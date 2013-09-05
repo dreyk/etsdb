@@ -31,7 +31,7 @@ prepare(timeout, #state{caller=Caller,it=It,bucket=Bucket}=StateData) ->
 		{Results,PrefList}->
 			{next_state,execute,StateData#state{preflist=PrefList,data=[],vnode_results=Results},0}
 	end.
-pscan(_Bucket,emty,Result,AllPrefLists,_Included)->
+pscan(_Bucket,empty,Result,AllPrefLists,_Included)->
 	{Result,lists:usort(AllPrefLists)};
 pscan(Bucket,#scan_it{partition=Partition}=It,Result,AllPrefLists,Included)->
 	PartitionIdx = crypto:hash(sha,Partition),
@@ -66,7 +66,7 @@ wait_result({r,Index,ReqID,Res},#state{caller=Caller,vnode_results=Results,req_r
 			reply_to_caller(Caller,{error,Error}),
 			{stop,normal,StateData};
 		{Data1,[]}->
-			reply_to_caller(Caller,{ok,Data1}),
+			reply_to_caller(Caller,{ok,lists:ukeysort(1,Data1)}),
 			{stop,normal,StateData};
 		{Data1,Results1}->
 			{next_state,wait_result, StateData#state{vnode_results=Results1,data=Data1},Timeout}
@@ -113,9 +113,9 @@ results(Index,Res,Bucket,[#results{indexes=Indexes}=Result|Results],Data,Acc)->
 					results(Index,ok,Bucket,Results,Data1,Acc1)
 			end;
 		_->
-			results(Index,Res,Bucket,Results,Data,Acc)
+			results(Index,Res,Bucket,Results,Data,[Result|Acc])
 	end.
-add_result(Index,{ok,L},Bucket,Result,Data,Acc)->			
+add_result(Index,{ok,L},Bucket,Result,Data,Acc)->	
 	L1 = Bucket:unserialize_result(L),
 	Data1 = Bucket:join_scan(L1,Data),
 	add_result(Index,ok,Bucket,Result,Data1,Acc);
