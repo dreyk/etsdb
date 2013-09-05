@@ -108,8 +108,10 @@ process_message(?ETSDB_CLIENT_PUT,BatchData,Sock)->
 			{error,bad_put_request}
 	end;
 process_message(?ETSDB_CLIENT_SCAN,<<IDLength:8/integer,ID:IDLength/binary,From:64/integer,IDLength:8/integer,ID:IDLength/binary,To:64/integer>>,Sock)->
+	lager:info("scan ~p",[{ID,From,To}]),
 	case etsdb_get:scan(etsdb_tkb,{ID,From},{ID,To},?DEFAULT_TIMEOUT) of
 		{ok,Data}->
+			lager:info("scan res ~p",[Data]),
 			{Size,Data1} = make_scan_result(Data),
 			send_reply(Sock,?ETSDB_CLIENT_OK,Size,Data1);
 		{error,Else} ->
