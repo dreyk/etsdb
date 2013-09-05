@@ -119,10 +119,12 @@ process_message(?ETSDB_CLIENT_SCAN,<<IDLength:8/integer,ID:IDLength/binary,From:
 			send_reply(Sock,?ETSDB_CLIENT_RUNTIME_ERROR,Else),
 			{error,put_runtime_error}
 	end;
-process_message(?ETSDB_CLIENT_SCAN,_,Sock)->
+process_message(?ETSDB_CLIENT_SCAN,Req,Sock)->
+	lager:error("bad scan requests ~p",[Req]),
 	send_reply(Sock,?ETSDB_CLIENT_UNKNOWN_DATA_FROMAT),
 	{error,bad_scan_request};
-process_message(_Type,_BatchData,Sock)->
+process_message(Type,BatchData,Sock)->
+	lager:error("bad ~p requests ~p",[Type,BatchData]),
 	send_reply(Sock,?ETSDB_CLIENT_UNKNOWN_REQ_TYPE),
 	{error,unknown_request_type}.
 
