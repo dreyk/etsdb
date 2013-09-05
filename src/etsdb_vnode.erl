@@ -82,8 +82,9 @@ start_clear_buckets([B|Tail])->
 	riak_core_vnode:send_command_after(clear_period(B),{clear_db,B}),
 	start_clear_buckets(Tail);
 start_clear_buckets([])->
+	ok;
+start_clear_buckets(_)->
 	ok.
-
 handle_handoff_command(Req=?ETSDB_STORE_REQ{}, Sender, State) ->
     {noreply, NewState} = handle_command(Req, Sender, State),
     {forward, NewState};
