@@ -107,7 +107,7 @@ process_message(?ETSDB_CLIENT_PUT,BatchData,Sock)->
 			send_reply(Sock,?ETSDB_CLIENT_UNKNOWN_DATA_FROMAT),
 			{error,bad_put_request}
 	end;
-process_message(?ETSDB_CLIENT_SCAN,<<IDLength:8/integer,ID:IDLength/binary,From:64/integer,IDLength:8/integer,ID:IDLength/binary,To:64/integer>>,Sock)->
+process_message(?ETSDB_CLIENT_SCAN,<<IDLength:8/integer,ID:IDLength/binary,From:64/integer,IDLength1:8/integer,_ID1:IDLength1/binary,To:64/integer>>,Sock)->
 	lager:info("scan ~p",[{ID,From,To}]),
 	case catch etsdb_get:scan(etsdb_tkb,{ID,From},{ID,To},?DEFAULT_TIMEOUT) of
 		{ok,Data}->
