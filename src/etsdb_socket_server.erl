@@ -151,7 +151,8 @@ make_scan_result([],Size,Acc)->
 	{Size,Acc};
 make_scan_result([{{ID,Time},Data}|T],Size,Acc)->
 	DataSize = size(Data),
-	make_scan_result(T,Size+DataSize+20,[<<DataSize:32/unsigned-integer,(size(ID)):8/integer,ID,Time:64/integer>>,Data|Acc]);
+	IDSize = size(ID),
+	make_scan_result(T,Size+DataSize+8+4+1+IDSize,[<<DataSize:32/unsigned-integer,IDSize:8/integer,ID,Time:64/integer>>,Data|Acc]);
 make_scan_result([_|T],Size,Acc)->
 	make_scan_result(T,Size,Acc).
 
