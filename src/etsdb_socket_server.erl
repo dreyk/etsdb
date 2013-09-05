@@ -126,7 +126,7 @@ process_message(_Type,_BatchData,Sock)->
 
 get_batch(<<>>,Acc)->
 	{ok,lists:reverse(Acc)};
-get_batch(<<DataSize:32/unsigned-integer,ID:64/integer,Time:64/integer,Data:DataSize/binary,Tail/binary>>,Acc)->
+get_batch(<<DataSize:32/unsigned-integer,IDLength:8/integer,ID:IDLength/binary,Time:64/integer,Data:DataSize/binary,Tail/binary>>,Acc)->
 	get_batch(Tail,[{{ID,Time},binary:copy(Data)}|Acc]);
 get_batch(_Else,_Acc)->
 	{error,bad_format}.
