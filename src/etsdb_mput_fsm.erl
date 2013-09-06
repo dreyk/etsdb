@@ -56,7 +56,7 @@ pwrite(Bucket,Ring,UpNodes,[{Partition,Data}|Datas],Results,ToSave)->
 join_save_batch(Preflist,ToSave,Data)->
 	ToSave1 = [{VNode,Data}||VNode<-lists:sort(Preflist)],
 	orddict:merge(fun(_,Data1,Data2)->
-						  ordict:merge(fun(_,V1,_)->
+						  orddict:merge(fun(_,V1,_)->
 											   V1 end,Data1,Data2)
 				  end,ToSave,ToSave1).
 

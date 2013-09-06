@@ -98,9 +98,8 @@ process_message(?ETSDB_CLIENT_PUT,BatchData,Sock)->
 	case catch get_batch(BatchData,[]) of
 		{ok,ErlData}->
 			case etsdb_put:put(etsdb_tkb,ErlData,?DEFAULT_TIMEOUT) of
-				#etsdb_store_res_v1{}=Res->
-					{Size,ResData} = make_store_result(Res),
-					send_reply(Sock,?ETSDB_CLIENT_OK,Size,ResData);
+				ok->
+					send_reply(Sock,?ETSDB_CLIENT_OK);
 				Else ->
 					lager:error("error ~p",[Else]),
 					send_reply(Sock,?ETSDB_CLIENT_RUNTIME_ERROR,Else),
