@@ -90,6 +90,10 @@ process_message(<<Type:8/integer,RequestData/binary>>,Sock)->
 process_message(_,Sock)->
 	send_reply(Sock,?ETSDB_CLIENT_UNKNOWN_REQ_TYPE),
 	{error,unknown_request_type}.
+
+process_message(?ETSDB_CLIENT_STREAM_START,_,Sock)->
+	send_reply(Sock,?ETSDB_CLIENT_OK);
+
 process_message(?ETSDB_CLIENT_PUT,BatchData,Sock)->
 	case catch get_batch(BatchData,[]) of
 		{ok,ErlData}->
@@ -131,6 +135,7 @@ process_message(?ETSDB_CLIENT_SCAN,<<IDLength:8/integer,ID:IDLength/binary,From:
 			send_reply(Sock,?ETSDB_CLIENT_RUNTIME_ERROR,Else),
 			{error,put_runtime_error}
 	end;
+
 process_message(?ETSDB_CLIENT_SCAN,Req,Sock)->
 	lager:error("bad scan requests ~p",[Req]),
 	send_reply(Sock,?ETSDB_CLIENT_UNKNOWN_DATA_FROMAT),

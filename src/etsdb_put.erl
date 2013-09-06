@@ -28,24 +28,15 @@
 put(Bucket,Data)->
 	put(Bucket,Data,?DEFAULT_TIMEOUT).
 
+put(_Bucket,[],_Timeout)->
+	ok;
 put(Bucket,Data,Timeout)->
 	PartitionedData = prepare_data(Bucket,Data),
-	do_put(Bucket,PartitionedData,Timeout,#etsdb_store_res_v1{count=0,error_count=0,errors=[]}).
-
-do_put(_Bucket,[],_Timeout,Results)->
-	Results;
-do_put(Bucket,[{Partition,Data}|T],Timeout,Results)->
 	ReqRef = make_ref(),
 	Me = self(),
-	PartionIdx  = etsdb_util:hash_for_partition(Partition),
-	etsdb_put_fsm:start_link({raw,ReqRef,Me},PartionIdx, Bucket, Data, Timeout),
-	ResultsNew = case wait_for_results(ReqRef,client_wait_timeout(Timeout)) of
-		ok->
-			merge_store_result(length(Data),Results);
-		Else->
-			merge_store_result(length(Data),etsdb_util:make_error_response(Else),Results)
-	end,
-	do_put(Bucket,T, Timeout,ResultsNew).
+	etsdb_mput_fsm:start_link({raw,ReqRef,Me}, Bucket, PartitionedData, Timeout),
+	wait_for_results(ReqRef,client_wait_timeout(Timeout)).
+
 
 prepare_data(Bucket,Data)->
 	Partitioned = Bucket:make_partitions(Data),
@@ -67,7 +58,7 @@ join_partiotions(Partitioned)->
 merge_user_data(Data,'$start')->
 	[Data];
 merge_user_data('$end',Acc)->
-	Acc;
+	lists:ukeysort(1,Acc);
 merge_user_data(Data,Acc)->
 	[Data|Acc].
 
