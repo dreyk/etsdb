@@ -37,44 +37,44 @@ init(_Args) ->
 
 
 invoke(M,F,A,Timeout)->
-	Worker = poolboy:checkout(?MODULE),
-	Result = gen_fsm:sync_send_event(Worker,{M,F,A,Timeout},infinity),
-	poolboy:checkin(?MODULE,Worker),
-	Result.
+    Worker = poolboy:checkout(?MODULE),
+    Result = gen_fsm:sync_send_event(Worker,{M,F,A,Timeout},infinity),
+    poolboy:checkin(?MODULE,Worker),
+    Result.
 
 wait_task({M,F,A,Timeout},From,State)->
-	Req = spawn_monitor(fun()->
-									Result = erlang:apply(M,F,A),
-									exit(Result)
-							end),
-	{ok,TimerRef}=timer:send_after(Timeout,{expired,Req}),
-	{next_state,wait_result,State#state{caller=From,request=Req,timeout_timer=TimerRef}}.
+    Req = spawn_monitor(fun()->
+                                    Result = erlang:apply(M,F,A),
+                                    exit(Result)
+                            end),
+    {ok,TimerRef}=timer:send_after(Timeout,{expired,Req}),
+    {next_state,wait_result,State#state{caller=From,request=Req,timeout_timer=TimerRef}}.
 
 
 handle_info({'DOWN', MonitorRef, _Type, Object, Info},wait_result,#state{caller=Caller,request={Object,MonitorRef},timeout_timer=Timer}) ->
-	gen_fsm:reply(Caller,Info),
-	timer:cancel(Timer),
-	{next_state,wait_task, #state{}};
+    gen_fsm:reply(Caller,Info),
+    timer:cancel(Timer),
+    {next_state,wait_task, #state{}};
 
 handle_info({expired,{TaskPid,TaskRef}=Req},StateName,#state{caller=Caller,request=CurrentReq}=State) ->
-	erlang:demonitor(TaskRef,[flush]),
-	erlang:exit(TaskPid,task_expired),
-	case CurrentReq of
-		Req->
-			gen_fsm:reply(Caller,{error,timeout}),
-    		{next_state,wait_task, #state{}};
-		_->
-			{next_state,StateName,State}
-	end;
+    erlang:demonitor(TaskRef,[flush]),
+    erlang:exit(TaskPid,task_expired),
+    case CurrentReq of
+        Req->
+            gen_fsm:reply(Caller,{error,timeout}),
+            {next_state,wait_task, #state{}};
+        _->
+            {next_state,StateName,State}
+    end;
 
 
 handle_info(_Info, StateName, StateData) ->
-    {next_state, StateName, StateData}.	
+    {next_state, StateName, StateData}.    
 
 
 terminate(Reason,_StateName,_State)->
-	lager:debug("terminating client worker ~p",[Reason]),
-	ok.
+    lager:debug("terminating client worker ~p",[Reason]),
+    ok.
 
 
 code_change(_OldVsn,_StateName, State, _Extra) ->

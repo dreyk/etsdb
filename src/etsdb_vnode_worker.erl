@@ -33,5 +33,5 @@ handle_work({invoke,Fun}, _Sender, State) ->
     {reply,Fun(),State};
 
 handle_work({clear_db,Fun}, _Sender, State) ->
-	Fun(),
+    Fun(),
     {noreply,State}.

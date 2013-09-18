@@ -22,59 +22,59 @@
 -export([num_partiotions/0]).
 
 -export([reduce_orddict/2,
-		 make_error_response/1,
-		 hash_for_partition/1,
-		 system_time/0,
-		 system_time/1,
-		 system_time/2,
-		 random_int/1]).
+         make_error_response/1,
+         hash_for_partition/1,
+         system_time/0,
+         system_time/1,
+         system_time/2,
+         random_int/1]).
 
 num_partiotions()->
-	{ok, Ring} = riak_core_ring_manager:get_my_ring(),
-	riak_core_ring:num_partitions(Ring).
+    {ok, Ring} = riak_core_ring_manager:get_my_ring(),
+    riak_core_ring:num_partitions(Ring).
 
 
 reduce_orddict(_ReduceFun,[])->
-	[];
+    [];
 reduce_orddict(ReduceFun,OrdDict)->
-	R = lists:foldl(fun({K,V},Acc)->
-							case Acc of
-								{K,ValAcc,Acc1}->
-									{K,ReduceFun(V,ValAcc),Acc1};
-								{M,ValAcc,Acc1}->
-									{K,ReduceFun(V,'$start'),[{M,ReduceFun('$end',ValAcc)}|Acc1]};
-								undefined->
-									{K,ReduceFun(V,'$start'),[]}
-							end end,undefined,OrdDict),
-	case R of
-		undefined->
-			[];
-		{K,ValAcc,Acc}->
-			lists:reverse([{K,ReduceFun('$end',ValAcc)}|Acc]);
-		_->
-			[]
-	end.
+    R = lists:foldl(fun({K,V},Acc)->
+                            case Acc of
+                                {K,ValAcc,Acc1}->
+                                    {K,ReduceFun(V,ValAcc),Acc1};
+                                {M,ValAcc,Acc1}->
+                                    {K,ReduceFun(V,'$start'),[{M,ReduceFun('$end',ValAcc)}|Acc1]};
+                                undefined->
+                                    {K,ReduceFun(V,'$start'),[]}
+                            end end,undefined,OrdDict),
+    case R of
+        undefined->
+            [];
+        {K,ValAcc,Acc}->
+            lists:reverse([{K,ReduceFun('$end',ValAcc)}|Acc]);
+        _->
+            []
+    end.
 
 make_error_response({error,_}=E)->
-	E;
+    E;
 make_error_response(E)->
-	{error,E}.
+    {error,E}.
 
 hash_for_partition(0) ->
     <<(trunc(math:pow(2,160))-1):160/integer>>;
 hash_for_partition(I) ->
     <<(I-1):160/integer>>.
-	
+    
 system_time()->
-	system_time(millisec).
+    system_time(millisec).
 system_time(millisec)->
-	system_time(millisec,os:timestamp());
+    system_time(millisec,os:timestamp());
 system_time(sec)->
-	system_time(sec,os:timestamp()).
+    system_time(sec,os:timestamp()).
 system_time(millisec,{Mega,S,Micro})->
-	(Mega*1000000+S)*1000+(Micro div 1000);
+    (Mega*1000000+S)*1000+(Micro div 1000);
 system_time(sec,{Mega,S,_})->
-	Mega*1000000+S.
+    Mega*1000000+S.
 
 random_int(Limit) when is_integer(Limit) andalso Limit > 0 -> 
         {_, Sec, Micro} = os:timestamp(), 

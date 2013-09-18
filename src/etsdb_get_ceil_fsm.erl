@@ -41,7 +41,7 @@ process_results({error, Reason}, _State) ->
     {error, Reason};
 process_results(Results,
                 StateData=#state{from={raw, ReqId, ClientPid}}) ->
-	ClientPid ! {ReqId, {results, Results}},
+    ClientPid ! {ReqId, {results, Results}},
     {ok, StateData};
 process_results(done, StateData) ->
     {done, StateData}.

@@ -31,10 +31,10 @@
                }).
 
 -export([init/2,
-		 save/3,
-		 scan/5,
-		 find_expired/2,
-		 delete/3,stop/1,drop/1,fold_objects/3,is_empty/1]).
+         save/3,
+         scan/5,
+         find_expired/2,
+         delete/3,stop/1,drop/1,fold_objects/3,is_empty/1]).
 
 init(Partition, Config) ->
     %% Initialize random seed
@@ -80,56 +80,56 @@ save(_Bucket,Data,#state{ref=Ref,write_opts=WriteOpts}=State) ->
             {error, Reason, State}
     end.
 find_expired(Bucket,#state{ref=Ref,fold_opts=FoldOpts})->
-	{StartIterate,Fun} = Bucket:expire_spec(?MODULE),
-	FoldFun = fun() ->
+    {StartIterate,Fun} = Bucket:expire_spec(?MODULE),
+    FoldFun = fun() ->
                 try
-					FoldResult = eleveldb:fold(Ref,Fun,{0,[]}, [{first_key,StartIterate} | FoldOpts]),
+                    FoldResult = eleveldb:fold(Ref,Fun,{0,[]}, [{first_key,StartIterate} | FoldOpts]),
                     {expired_records,FoldResult}
                 catch
                     {break, AccFinal} ->
-						{expired_records,AccFinal}
+                        {expired_records,AccFinal}
                 end
         end,
-	{async,FoldFun}.
+    {async,FoldFun}.
 scan(Bucket,From,To,Acc,#state{ref=Ref,fold_opts=FoldOpts})->
-	{StartIterate,Fun} = Bucket:scan_spec(From,To,?MODULE),
-	FoldFun = fun() ->
+    {StartIterate,Fun} = Bucket:scan_spec(From,To,?MODULE),
+    FoldFun = fun() ->
                 try
-					FoldResult = eleveldb:fold(Ref,Fun,Acc, [{first_key,StartIterate} | FoldOpts]),
+                    FoldResult = eleveldb:fold(Ref,Fun,Acc, [{first_key,StartIterate} | FoldOpts]),
                     {ok,lists:reverse(FoldResult)}
                 catch
                     {break, AccFinal} ->
-						{ok,lists:reverse(AccFinal)}
+                        {ok,lists:reverse(AccFinal)}
                 end
         end,
-	{async,FoldFun}.
+    {async,FoldFun}.
 
 is_empty(#state{ref=Ref}) ->
    eleveldb:is_empty(Ref).
 
 fold_objects(FoldObjectsFun, Acc, #state{fold_opts=FoldOpts,ref=Ref}) ->  
-	FoldFun = fun({StorageKey, Value}, Acc) ->
-					  try
-						  FoldObjectsFun(StorageKey, Value, Acc)
-					  catch
-						  stop_fold->
-						  		throw({break, Acc})
-						end
-				end,
-	ObjectFolder =
-		fun() ->
-			try
-				eleveldb:fold(Ref, FoldFun, Acc, FoldOpts)
-			catch
-				{break, AccFinal} ->
-					AccFinal
-			end
-		end,
-	{async, ObjectFolder}.
+    FoldFun = fun({StorageKey, Value}, Acc) ->
+                      try
+                          FoldObjectsFun(StorageKey, Value, Acc)
+                      catch
+                          stop_fold->
+                                  throw({break, Acc})
+                        end
+                end,
+    ObjectFolder =
+        fun() ->
+            try
+                eleveldb:fold(Ref, FoldFun, Acc, FoldOpts)
+            catch
+                {break, AccFinal} ->
+                    AccFinal
+            end
+        end,
+    {async, ObjectFolder}.
 
 delete(_,Data,#state{ref=Ref,write_opts=WriteOpts}=State)->
-	Updates = [{delete, StorageKey}||StorageKey<-Data],
-	case eleveldb:write(Ref, Updates,WriteOpts) of
+    Updates = [{delete, StorageKey}||StorageKey<-Data],
+    case eleveldb:write(Ref, Updates,WriteOpts) of
         ok ->
             {ok, State};
         {error, Reason} ->

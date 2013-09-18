@@ -25,58 +25,58 @@
 -behaviour(application).
 
 -export([
-	 start/2,
-	 stop/1,
-	 start_test/0]).
+     start/2,
+     stop/1,
+     start_test/0]).
 
 
 -spec start(Type::term(), StartArgs::term())-> {ok,pid()} | ignore | {error,Error::term()}.
 %% @doc The application:start callback for etsdb.
 %%      Arguments are ignored as all configuration is done via the erlenv file.
 start(_Type, _StartArgs) ->
-	%% Add user-provided code paths to vm
-	case app_helper:get_env(etsdb, add_paths) of
-		List when is_list(List) ->
-			ok = code:add_paths(List);
-		_ ->
-			ok
-	end,
-	%%Start main supervisor
-	case etsdb_sup:start_link() of
-		{ok, Pid} ->
-			init_riak_core_services(),
-			%%ok = riak_api_pb_service:register([{etsdb_pb_client,10,13}]),
-			{ok, Pid};
-		Error ->
-			Error
-	end.
+    %% Add user-provided code paths to vm
+    case app_helper:get_env(etsdb, add_paths) of
+        List when is_list(List) ->
+            ok = code:add_paths(List);
+        _ ->
+            ok
+    end,
+    %%Start main supervisor
+    case etsdb_sup:start_link() of
+        {ok, Pid} ->
+            init_riak_core_services(),
+            %%ok = riak_api_pb_service:register([{etsdb_pb_client,10,13}]),
+            {ok, Pid};
+        Error ->
+            Error
+    end.
 
 stop(_State) ->
-	lager:info("Stopped  application etsdb.\n", []),
-	ok.
+    lager:info("Stopped  application etsdb.\n", []),
+    ok.
 
 %%Init riak_core, rigister etsdb in ring.
 init_riak_core_services()->
-	ok = riak_core:register(etsdb,[{vnode_module,etsdb_vnode}]).
+    ok = riak_core:register(etsdb,[{vnode_module,etsdb_vnode}]).
 
 %%Start app in command line.
 %%You may use this fun for debug.
 start_test()->
-	erlang:spawn(fun()->start_test_inner() end).
+    erlang:spawn(fun()->start_test_inner() end).
 start_test_inner() ->
-	ok = application:start(sasl),
-	ok = application:start(os_mon),
+    ok = application:start(sasl),
+    ok = application:start(os_mon),
     ok = application:start(crypto),
-	ok = application:start(compiler),
-	ok = application:start(syntax_tools),
-	ok = application:start(lager),
+    ok = application:start(compiler),
+    ok = application:start(syntax_tools),
+    ok = application:start(lager),
     ok = application:start(riak_sysmon),
-	ok = application:start(inets),
-	ok = application:start(public_key),
-	ok = application:start(ssl),
-	ok = application:start(xmerl),
-	ok = application:start(mochiweb),
+    ok = application:start(inets),
+    ok = application:start(public_key),
+    ok = application:start(ssl),
+    ok = application:start(xmerl),
+    ok = application:start(mochiweb),
     ok = application:start(webmachine),
-	ok = application:start(riak_core),
-	ok = application:start(riak_api),
-	ok = application:start(etsdb).
+    ok = application:start(riak_core),
+    ok = application:start(riak_api),
+    ok = application:start(etsdb).

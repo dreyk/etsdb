@@ -26,60 +26,60 @@
 -include("etsdb_request.hrl").
 
 put(Bucket,Data)->
-	put(Bucket,Data,?DEFAULT_TIMEOUT).
+    put(Bucket,Data,?DEFAULT_TIMEOUT).
 
 put(_Bucket,[],_Timeout)->
-	ok;
+    ok;
 put(Bucket,Data,Timeout)->
-	PartitionedData = prepare_data(Bucket,Data),
-	ReqRef = make_ref(),
-	Me = self(),
-	etsdb_mput_fsm:start_link({raw,ReqRef,Me}, Bucket, PartitionedData, Timeout),
-	wait_for_results(ReqRef,client_wait_timeout(Timeout)).
+    PartitionedData = prepare_data(Bucket,Data),
+    ReqRef = make_ref(),
+    Me = self(),
+    etsdb_mput_fsm:start_link({raw,ReqRef,Me}, Bucket, PartitionedData, Timeout),
+    wait_for_results(ReqRef,client_wait_timeout(Timeout)).
 
 
 prepare_data(Bucket,Data)->
-	Partitioned = Bucket:make_partitions(Data),
-	%%DatasByUserPartition = join_partiotions(Partitioned),
-	{ok,Ring} = riak_core_ring_manager:get_my_ring(),
-	batch_partitions(Ring,Partitioned,[]).
+    Partitioned = Bucket:make_partitions(Data),
+    %%DatasByUserPartition = join_partiotions(Partitioned),
+    {ok,Ring} = riak_core_ring_manager:get_my_ring(),
+    batch_partitions(Ring,Partitioned,[]).
 
 batch_partitions(_,[],Acc)->
-	join_partiotions(Acc);
+    join_partiotions(Acc);
 batch_partitions(Ring,[{Partition,Data}|T],Acc)->
-	Idx = crypto:hash(sha,Partition),
-	VnodeIdx=riak_core_ring:responsible_index(Idx,Ring),
-	batch_partitions(Ring,T,[{VnodeIdx,Data}|Acc]).
+    Idx = crypto:hash(sha,Partition),
+    VnodeIdx=riak_core_ring:responsible_index(Idx,Ring),
+    batch_partitions(Ring,T,[{VnodeIdx,Data}|Acc]).
 
 join_partiotions(Partitioned)->
-	SortByPartition = lists:keysort(1,Partitioned),
-	etsdb_util:reduce_orddict(fun merge_user_data/2,SortByPartition).
+    SortByPartition = lists:keysort(1,Partitioned),
+    etsdb_util:reduce_orddict(fun merge_user_data/2,SortByPartition).
 
 merge_user_data(Data,'$start')->
-	[Data];
+    [Data];
 merge_user_data('$end',Acc)->
-	lists:ukeysort(1,Acc);
+    lists:ukeysort(1,Acc);
 merge_user_data(Data,Acc)->
-	[Data|Acc].
+    [Data|Acc].
 
 wait_for_results(ReqRef,Timeout)->
-	receive 
-		{ReqRef,Res}->
-			Res;
-		{_OldReqRef,_OldRes}->
-			wait_for_results(ReqRef,Timeout)
-	after Timeout->
-			{error,timeout}
-	end.
+    receive 
+        {ReqRef,Res}->
+            Res;
+        {_OldReqRef,_OldRes}->
+            wait_for_results(ReqRef,Timeout)
+    after Timeout->
+            {error,timeout}
+    end.
 
 merge_store_result(ErrCount,Error,#etsdb_store_res_v1{error_count=AE,errors=AEs}=Acc)->
-	Acc#etsdb_store_res_v1{error_count=ErrCount+AE,errors=[Error|AEs]}.
+    Acc#etsdb_store_res_v1{error_count=ErrCount+AE,errors=[Error|AEs]}.
 merge_store_result(C,#etsdb_store_res_v1{count=AC}=Acc) when is_integer(C)->
-	Acc#etsdb_store_res_v1{count=C+AC};
+    Acc#etsdb_store_res_v1{count=C+AC};
 merge_store_result(#etsdb_store_res_v1{count=C,error_count=E,errors=Es},#etsdb_store_res_v1{count=AC,error_count=AE,errors=AEs}=Acc)->
-	Acc#etsdb_store_res_v1{count=C+AC,error_count=E+AE,errors=AEs++Es}.
+    Acc#etsdb_store_res_v1{count=C+AC,error_count=E+AE,errors=AEs++Es}.
 
 
 %%Add 50ms to operation timeout
 client_wait_timeout(Timeout)->
-	Timeout + 50.
+    Timeout + 50.

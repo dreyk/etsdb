@@ -47,12 +47,12 @@ encode(Message) ->
 
 
 process(#tkvbatch{records=Records}, #state{} = State) ->
-	Records1 = lists:sort([{{ID,Time},Value}||#tkvrecord{id=ID,time=Time,value=Value}<-Records]),
+    Records1 = lists:sort([{{ID,Time},Value}||#tkvrecord{id=ID,time=Time,value=Value}<-Records]),
     case etsdb_put:put(etsdb_tkb,Records1,?DEFAULT_TIMEOUT) of
-		ok->
-			{reply,ok, State};
+        ok->
+            {reply,ok, State};
         {errors, Reason} ->
-			io:format("error ~p~n",[Reason]),
+            io:format("error ~p~n",[Reason]),
             {reply,error, State}
     end.
 

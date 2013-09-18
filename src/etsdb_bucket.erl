@@ -30,11 +30,11 @@
 behaviour_info(callbacks) ->
     [
      {api_version,0},
-	 {w_val,0},
-	 {r_val,0},
-	 {w_quorum,0},
-	 {r_quorum,0},
-	 {make_partitions,1}
-	];
+     {w_val,0},
+     {r_val,0},
+     {w_quorum,0},
+     {r_quorum,0},
+     {make_partitions,1}
+    ];
 behaviour_info(_Other) ->
     undefined.

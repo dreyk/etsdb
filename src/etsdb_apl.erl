@@ -30,6 +30,6 @@
 -export([get_apl/2,get_apl/4]).
 
 get_apl(Partition, N)->
-	riak_core_apl:get_apl(Partition,N,etsdb).
+    riak_core_apl:get_apl(Partition,N,etsdb).
 get_apl(Partition, N,Ring,UpNodes)->
-	riak_core_apl:get_apl(Partition,N,Ring,UpNodes).
+    riak_core_apl:get_apl(Partition,N,Ring,UpNodes).
