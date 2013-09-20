@@ -46,6 +46,8 @@ prepare_data(Bucket,Data)->
 
 batch_partitions(_,[],Acc)->
     join_partiotions(Acc);
+batch_partitions(Ring,[{{vidx,VnodeIdx},Data}|T],Acc)->
+    batch_partitions(Ring,T,[{VnodeIdx,Data}|Acc]);
 batch_partitions(Ring,[{Partition,Data}|T],Acc)->
     Idx = crypto:hash(sha,Partition),
     VnodeIdx=riak_core_ring:responsible_index(Idx,Ring),
@@ -71,14 +73,6 @@ wait_for_results(ReqRef,Timeout)->
     after Timeout->
             {error,timeout}
     end.
-
-merge_store_result(ErrCount,Error,#etsdb_store_res_v1{error_count=AE,errors=AEs}=Acc)->
-    Acc#etsdb_store_res_v1{error_count=ErrCount+AE,errors=[Error|AEs]}.
-merge_store_result(C,#etsdb_store_res_v1{count=AC}=Acc) when is_integer(C)->
-    Acc#etsdb_store_res_v1{count=C+AC};
-merge_store_result(#etsdb_store_res_v1{count=C,error_count=E,errors=Es},#etsdb_store_res_v1{count=AC,error_count=AE,errors=AEs}=Acc)->
-    Acc#etsdb_store_res_v1{count=C+AC,error_count=E+AE,errors=AEs++Es}.
-
 
 %%Add 50ms to operation timeout
 client_wait_timeout(Timeout)->
