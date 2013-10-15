@@ -51,7 +51,7 @@ macan(Bucket,#scan_it{from=From,to=To}=It,Timeout)->
         {ok,Res} when is_list(Res)->
             {ok,Res};
         Else->
-            lager:error("Bad scan responce for ~p",[Else]),
+            lager:error("Bad scan responce for range (~p - ~p) ~p used timeout ~p",[From,To,Else,Timeout]),
             etsdb_util:make_error_response(Else)
     end.
 scan_partiotions(_Bucket,_From,_To,_InitaialAcc,[],Acc,_Timeout)->
