@@ -5,3 +5,4 @@ deps
 *.plt
 .project
 .settings/*
+/ebin
