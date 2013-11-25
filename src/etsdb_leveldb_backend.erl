@@ -94,15 +94,19 @@ find_expired(Bucket,#state{ref=Ref,fold_opts=FoldOpts})->
 scan(Bucket,From,To,Acc,#state{ref=Ref,fold_opts=FoldOpts})->
     {StartIterate,Fun} = Bucket:scan_spec(From,To,?MODULE),
     FoldFun = fun() ->
-                try
-                    FoldResult = eleveldb:fold(Ref,Fun,Acc, [{first_key,StartIterate} | FoldOpts]),
-                    {ok,lists:reverse(FoldResult)}
-                catch
-                    {break, AccFinal} ->
-                        {ok,lists:reverse(AccFinal)}
-                end
-        end,
+                multi_fold(Ref, FoldOpts, StartIterate, Fun, Acc) end,
     {async,FoldFun}.
+
+multi_fold(Ref,FoldOpts,StartIterate,Fun,Acc)->
+    try
+        FoldResult = eleveldb:fold(Ref,Fun,Acc, [{first_key,StartIterate} | FoldOpts]),
+        {ok,lists:reverse(FoldResult)}
+    catch
+        {break,{coninue,ContinueIterate,AccContinue}} ->
+            multi_fold(Ref, FoldOpts,ContinueIterate, Fun, AccContinue);
+        {break, AccFinal} ->
+            {ok,lists:reverse(AccFinal)}
+     end.
 
 is_empty(#state{ref=Ref}) ->
    eleveldb:is_empty(Ref).
