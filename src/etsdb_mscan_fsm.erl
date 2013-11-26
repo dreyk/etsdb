@@ -87,6 +87,13 @@ execute(timeout, #state{preflist=Preflist,getquery=Query,bucket=Bucket,timeout=T
 
 
 wait_result({r,Index,ReqID,Res},#state{caller=Caller,vnode_results=Results,req_ref=ReqID,bucket=Bucket,timeout=Timeout,data=Data}=StateData) ->
+    IsGood = case Res of
+                 {ok,_}->
+                     true;
+                 _->
+                     false
+             end,
+    lager:info("receive index ~p res ~p",[Index,IsGood]),
     case results(Index, Res, Bucket,Results,Data,[]) of
         {error,Error}->
             reply_to_caller(Caller,{error,Error}),
