@@ -157,7 +157,6 @@ handle_command(?ETSDB_GET_QUERY_REQ{bucket=Bucket,get_query=Query,req_id=ReqID},
             Fun =
                 fun()->
                         InvokeRes = AsyncWork(),
-                        lager:info("ScanIndex ~p ok",[Index]),
                         {r,Index,ReqID,InvokeRes} end,
             {async, {invoke,Fun},Sender, State};
         Result->

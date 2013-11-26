@@ -93,7 +93,6 @@ wait_result({r,Index,ReqID,Res},#state{caller=Caller,vnode_results=Results,req_r
                  _->
                      false
              end,
-    lager:info("receive index ~p res ~p",[Index,IsGood]),
     case results(Index, Res, Bucket,Results,Data,[]) of
         {error,Error}->
             reply_to_caller(Caller,{error,Error}),
