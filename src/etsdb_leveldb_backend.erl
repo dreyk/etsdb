@@ -102,8 +102,8 @@ multi_fold(Ref,FoldOpts,StartIterate,Fun,Acc)->
         FoldResult = eleveldb:fold(Ref,Fun,Acc, [{first_key,StartIterate} | FoldOpts]),
         {ok,lists:reverse(FoldResult)}
     catch
-        {break,{coninue,ContinueIterate,AccContinue}} ->
-            multi_fold(Ref, FoldOpts,ContinueIterate, Fun, AccContinue);
+        {coninue,{NextKey,NextFun,ConitnueAcc}} ->
+            multi_fold(Ref, FoldOpts,NextKey,NextFun,ConitnueAcc);
         {break, AccFinal} ->
             {ok,lists:reverse(AccFinal)}
      end.
