@@ -156,7 +156,9 @@ handle_command(?ETSDB_GET_QUERY_REQ{bucket=Bucket,get_query=Query,req_id=ReqID},
         {async, AsyncWork} ->
             Fun =
                 fun()->
-                        {r,Index,ReqID,AsyncWork()} end,
+                        InvokeRes = AsyncWork(),
+                        lager:info("ScanIndex ~p ok",[Index]),
+                        {r,Index,ReqID,InvokeRes} end,
             {async, {invoke,Fun},Sender, State};
         Result->
             riak_core_vnode:reply(Sender, {r,Index,ReqID,Result}),

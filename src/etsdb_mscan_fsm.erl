@@ -98,7 +98,8 @@ wait_result({r,Index,ReqID,Res},#state{caller=Caller,vnode_results=Results,req_r
             {next_state,wait_result, StateData#state{vnode_results=Results1,data=Data1},Timeout}
     end;
 
-wait_result(timeout,#state{caller=Caller}=StateData) ->
+wait_result(timeout,#state{caller=Caller,vnode_results=Results}=StateData) ->
+    lager:error("timeout when results ~p",[Results]),
     reply_to_caller(Caller,{error,timeout}),
     {stop,normal,StateData}.
 
@@ -145,7 +146,7 @@ add_result(Index,{ok,L},Bucket,Result,Data,Acc)->
     L1 = Bucket:unserialize_result(L),
     Data1 = Bucket:join_scan(L1,Data),
     add_result(Index,ok,Bucket,Result,Data1,Acc);
-add_result(_Index,ok,_Bucket,#results{num_ok=Count,ok_quorum=Quorum}=Result,Data,Acc)->        
+add_result(_Index,ok,_Bucket,#results{num_ok=Count,ok_quorum=Quorum}=Result,Data,Acc)->
     Count1 = Count+1,
     if
         Count1==Quorum->
