@@ -29,8 +29,15 @@ init_worker(VNodeIndex, _Args, _Props) ->
     {ok, #state{index=VNodeIndex}}.
 
 %% @doc Perform the asynchronous fold operation.
-handle_work({invoke,Fun}, _Sender, State) ->
-    {reply,Fun(),State};
+handle_work({invoke,Fun}, Sender, State) ->
+    Res = Fun(),
+    case Sender of
+        {fsm,undefined,From}->
+            gen_fsm:send_event(From,Res),
+            {noreply,State};
+        _->
+            {reply,Res,State}
+    end;
 
 handle_work({clear_db,Fun}, _Sender, State) ->
     Fun(),
