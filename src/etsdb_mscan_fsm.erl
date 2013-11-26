@@ -32,7 +32,7 @@ prepare(timeout, #state{caller=Caller,it=It,bucket=Bucket}=StateData) ->
             {next_state,execute,StateData#state{preflist=PrefList,data=[],vnode_results=Results},0}
     end.
 
-pscan(Bucket,all,Result,AllPrefLists,Included)->
+pscan(Bucket,#scan_it{partition=all},Result,AllPrefLists,Included)->
     {ok, Ring} = riak_core_ring_manager:get_my_ring(),
     AllOwners = riak_core_ring:all_owners(Ring),
     pscan(Bucket,AllOwners,Result,AllPrefLists,Included);
