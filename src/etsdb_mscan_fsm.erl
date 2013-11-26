@@ -31,24 +31,50 @@ prepare(timeout, #state{caller=Caller,it=It,bucket=Bucket}=StateData) ->
         {Results,PrefList}->
             {next_state,execute,StateData#state{preflist=PrefList,data=[],vnode_results=Results},0}
     end.
+
+pscan(Bucket,all,Result,AllPrefLists,Included)->
+    {ok, Ring} = riak_core_ring_manager:get_my_ring(),
+    AllOwners = riak_core_ring:all_owners(Ring),
+    pscan(Bucket,AllOwners,Result,AllPrefLists,Included);
+pscan(_Bucket,[],Result,AllPrefLists,_Included)->
+    {Result,lists:usort(AllPrefLists)};
 pscan(_Bucket,empty,Result,AllPrefLists,_Included)->
     {Result,lists:usort(AllPrefLists)};
+pscan(Bucket,[{Index,_}|Tail],Result,AllPrefLists,Included)->
+   PartitionIdx = etsdb_util:hash_for_partition(Index),
+   case make_request_result(Bucket, PartitionIdx, Included) of
+        ok->
+            pscan(Bucket,Tail,Result,AllPrefLists,Included);
+        {ScanReqRes,Preflist,Vnode}->
+            pscan(Bucket,Tail,[ScanReqRes|Result],AllPrefLists++Preflist,[Vnode|Included]);
+        Error->
+            Error
+    end;
 pscan(Bucket,#scan_it{partition=Partition}=It,Result,AllPrefLists,Included)->
     PartitionIdx = crypto:hash(sha,Partition),
-    ReadCount = Bucket:r_val(),
+    case make_request_result(Bucket, PartitionIdx, Included) of
+        ok->
+            pscan(Bucket,Bucket:scan_partiotions(It),Result,AllPrefLists,Included);
+        {ScanReqRes,Preflist,Vnode}->
+            pscan(Bucket,Bucket:scan_partiotions(It),[ScanReqRes|Result],AllPrefLists++Preflist,[Vnode|Included]);
+        Error->
+            Error
+    end.
+
+make_request_result(Bucket,PartitionIdx,Included)->
+     ReadCount = Bucket:r_val(),
     case preflist(PartitionIdx,ReadCount) of
         {error,Error}->
             {error,Error};
         [Vnode|_]=Preflist when length(Preflist)==ReadCount->
             case lists:member(Vnode,Included) of
                 true->
-                    pscan(Bucket,Bucket:scan_partiotions(It),Result,AllPrefLists,Included);
+                    ok;
                 _->
                     NumOk = Bucket:r_quorum(),
                     NumFail = ReadCount-NumOk+1,
                     PrefIndex = [Index||{Index,_}<-Preflist],
-                    pscan(Bucket,Bucket:scan_partiotions(It),[#results{ok_quorum=NumOk,fail_quorum=NumFail,indexes=PrefIndex}|Result],AllPrefLists++Preflist,
-                          [Vnode|Included])
+                    {#results{ok_quorum=NumOk,fail_quorum=NumFail,indexes=PrefIndex},Preflist,Vnode}
             end;
         _Preflist->
             {error,insufficient_vnodes}
