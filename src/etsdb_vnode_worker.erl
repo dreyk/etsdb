@@ -34,6 +34,7 @@ handle_work({invoke,Fun}, Sender, State) ->
     case Sender of
         {fsm,undefined,From}->
             gen_fsm:send_event(From,Res),
+            erlang:garbage_collect(),
             {noreply,State};
         _->
             {reply,Res,State}
@@ -41,4 +42,5 @@ handle_work({invoke,Fun}, Sender, State) ->
 
 handle_work({clear_db,Fun}, _Sender, State) ->
     Fun(),
+    erlang:garbage_collect(),
     {noreply,State}.
