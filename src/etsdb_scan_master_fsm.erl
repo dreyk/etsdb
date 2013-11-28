@@ -108,10 +108,10 @@ execute(timeout, #state{local_scaners=ToScan,scan_req=ScanReq,timeout=Timeout,ca
 start_local_fsm([],_Ref,_ScanReq,_Timeout,Monitors)->
     Monitors;
 start_local_fsm([{Node,Requests}|Tail],Ref,ScanReq,Timeout,Monitors)->
-    case etsdb_mscan_local_fsm:start(Ref,Node) of
+    case etsdb_scan_local_fsm:start(Ref,Node) of
         {ok,Pid}->
              MRef = erlang:monitor(process,Pid),
-             etsdb_mscan_local_fsm:ack(Pid,ScanReq#scan_req{pscan=Requests},Timeout),
+             etsdb_scan_local_fsm:ack(Pid,ScanReq#scan_req{pscan=Requests},Timeout),
              start_local_fsm(Tail,Ref,ScanReq,Timeout,[{MRef,Pid}|Monitors]);
         Else->
             lager:error("Can't start local scan on ~p reason ~p",[Node,Else]),
@@ -120,7 +120,7 @@ start_local_fsm([{Node,Requests}|Tail],Ref,ScanReq,Timeout,Monitors)->
 
 stop_started(Started)->
     lists:foreach(fun({_,Pid})->
-                          etsdb_mscan_local_fsm:stop(Pid) end,Started).
+                          etsdb_scan_local_fsm:stop(Pid) end,Started).
 
 wait_result({local_scan,ReqID,From,Ack,LocalData},#state{caller=Caller,scan_req=Scan,local_scaners=Scaners,req_ref=ReqID,ack_data=AckData,data=Data}=StateData) ->
     NewScaners = lists:keydelete(From,2,Scaners),
