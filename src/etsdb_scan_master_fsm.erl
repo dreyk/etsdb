@@ -59,7 +59,7 @@ prepare(#state{caller=Caller,scan_req=ScanReq}=StateData) ->
             reply_to_caller(Caller,{error,Error}),
             {stop,normal,StateData};
         ReqNodes->
-            {next_state,execute,StateData#state{local_scaners=ReqNodes,ack_data=AckData},0}
+            {next_state,execute,StateData#state{local_scaners=ReqNodes,ack_data=lists:ukeysort(1,AckData)},0}
     end.
 
 merge_scan1(Data,'$start') when is_list(Data)->
@@ -103,7 +103,7 @@ execute(timeout, #state{local_scaners=ToScan,scan_req=ScanReq,timeout=Timeout,ca
             stop_started(Started),
             {stop,Error,StateData};
         Started->
-            {next_state,wait_result, StateData#state{req_ref=Ref,local_scaners=Started}}
+            {next_state,wait_result, StateData#state{req_ref=Ref,local_scaners=Started},Timeout}
     end.
 
 start_local_fsm([],_Ref,_ScanReq,_Timeout,Monitors)->
@@ -123,6 +123,10 @@ stop_started(Started)->
     lists:foreach(fun({_,Pid})->
                           etsdb_scan_local_fsm:stop(Pid) end,Started).
 
+wait_result(timeout,#state{caller=Caller,local_scaners=Scaners}=StateData) ->
+     reply_to_caller(Caller,{error,timeout}),
+     stop_started(Scaners),
+     {stop,normal,StateData#state{data=undefined,local_scaners=[]}};
 wait_result({local_scan,ReqID,From,Ack,LocalData},#state{caller=Caller,scan_req=Scan,local_scaners=Scaners,req_ref=ReqID,ack_data=AckData,data=Data}=StateData) ->
     NewScaners = lists:keydelete(From,2,Scaners),
     case ack(Ack,AckData) of
@@ -137,7 +141,7 @@ wait_result({local_scan,ReqID,From,Ack,LocalData},#state{caller=Caller,scan_req=
             {stop,normal,StateData#state{data=undefined,local_scaners=[]}};
         NewAckData->
             NewData = join_data(Scan#scan_req.join_fun,LocalData,Data),
-            {next_state,wait_result, StateData#state{data=NewData,ack_data=NewAckData,local_scaners=NewScaners}}
+            {next_state,wait_result, StateData#state{data=NewData,ack_data=NewAckData,local_scaners=NewScaners},StateData#state.timeout}
     end;
 wait_result({local_scan,ReqID,From,Error},#state{caller=Caller,req_ref=ReqID,local_scaners=Scaners}=StateData) ->
     lager:error("fail scan on ~p reason ~p",[node(From),Error]),
