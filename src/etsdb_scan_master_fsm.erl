@@ -103,7 +103,7 @@ execute(timeout, #state{local_scaners=ToScan,scan_req=ScanReq,timeout=Timeout,ca
             stop_started(Started),
             {stop,Error,StateData};
         Started->
-            {next_state,wait_result, StateData#state{req_ref=Ref,local_scaners=Started},Timeout}
+            {next_state,wait_result, StateData#state{req_ref=Ref,local_scaners=Started,data=[]},Timeout}
     end.
 
 start_local_fsm([],_Ref,_ScanReq,_Timeout,Monitors)->
@@ -129,7 +129,6 @@ wait_result(timeout,#state{caller=Caller,local_scaners=Scaners}=StateData) ->
      {stop,normal,StateData#state{data=undefined,local_scaners=[]}};
 wait_result({local_scan,ReqID,From,Ack,LocalData},#state{caller=Caller,scan_req=Scan,local_scaners=Scaners,req_ref=ReqID,ack_data=AckData,data=Data}=StateData) ->
     NewScaners = lists:keydelete(From,2,Scaners),
-    lager:info("recieve ~p",[LocalData]),
     case ack(Ack,AckData) of
         {error,Error}->
             reply_to_caller(Caller,{error,Error}),
@@ -137,7 +136,6 @@ wait_result({local_scan,ReqID,From,Ack,LocalData},#state{caller=Caller,scan_req=
             {stop,normal,StateData#state{data=undefined,local_scaners=[]}};
         []->
             NewData = join_data(Scan#scan_req.join_fun,LocalData,Data),
-            lager:info("new ~p",[NewData]),
             reply_to_caller(Caller,{ok,NewData}),
             stop_started(NewScaners),
             {stop,normal,StateData#state{data=undefined,local_scaners=[]}};
@@ -180,10 +178,8 @@ ack([{Ref,Result}|Tail],AckData)->
     end.
 
 join_data({M,F,A},NewData,OldData)->
-    lager:info("join ~p",[{{M,F,A},NewData,OldData}]),
     apply(M,F,[NewData,OldData|A]);
 join_data(Fun,NewData,OldData)->
-    lager:info("join ~p",[{Fun,NewData,OldData}]),
     Fun(NewData,OldData).
 
 handle_event(_Event, StateName, StateData) ->

@@ -67,7 +67,6 @@ wait_result({r,Index,ReqID,Result},#state{caller=Caller,scan=Scan,count=Count,re
             NewData = Data,
             NewToAck = lists:foldl(fun(ScanRef,Acc)->[{ScanRef,error}|Acc] end,ToAck,RefToAcc)
     end,
-    lager:info("new count ~p on ~p",[NewCount,Index]),
     if
         NewCount==0->
             reply_to_caller(Caller,NewToAck,NewData),
@@ -99,10 +98,8 @@ code_change(_OldVsn, StateName, StateData, _Extra) ->
     {ok, StateName, StateData}.
 
 reply_to_caller({Name,Ref},Error)->
-    lager:error("local error ~p",[Error]),
     gen_fsm:send_event(Name,{local_scan,Ref,self(),Error}).
 reply_to_caller({Name,Ref},Ack,LocalData)->
-    lager:info("local ok ~p",[Ack]),
     gen_fsm:send_event(Name,{local_scan,Ref,self(),Ack,LocalData}).
 
 clear_state(State)->
