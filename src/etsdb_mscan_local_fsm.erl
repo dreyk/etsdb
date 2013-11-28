@@ -36,9 +36,9 @@ ack({Preflist,Bucket,Query,Timeout},StateData)->
     etsdb_vnode:get_query(Ref,Preflist,Bucket,Query),
     {next_state,wait_result,StateData#state{count=length(Preflist),ack_index=[],data=[],req_ref=Ref,timeout=Timeout},Timeout}.
 
-wait_result(timeout,#state{caller=Caller,count=Count,ack_index=AckIndex,data=Data}=StateData) ->
+wait_result(timeout,#state{caller=Caller,count=Count}=StateData) ->
     lager:error("timeout wait response from ~p partitions",[Count]),
-    reply_to_caller(Caller,{timeout,AckIndex,Data}),
+    reply_to_caller(Caller,{error,timeout}),
     {stop,normal,StateData#state{data=undefined}};
 wait_result({r,Index,ReqID,Res},#state{caller=Caller,count=Count,req_ref=ReqID,ack_index=AckIndex,data=Data}=StateData) ->
     NewCount = Count-1,

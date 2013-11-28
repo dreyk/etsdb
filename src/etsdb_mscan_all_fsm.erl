@@ -89,7 +89,8 @@ wait_result({local_scan,ReqID,From,{ok,_AckIndex,LocalData}},#state{caller=Calle
         _->
              {next_state,wait_result, StateData#state{local_scaners=NewScaners,data=NewData},StateData#state.timeout}
     end;
-wait_result({local_scan,ReqID,From,{timeout,_AckIndex,_Data}},#state{caller=Caller,req_ref=ReqID,local_scaners=Scaners}=StateData) ->
+wait_result({local_scan,ReqID,From,{error,Error}},#state{caller=Caller,req_ref=ReqID,local_scaners=Scaners}=StateData) ->
+    lager:error("fail scan on ~p reason ~p",[node(From),Error]),
     NewScaners = lists:keydelete(From, 2,Scaners),
     reply_to_caller(Caller,{error,timeout}),
     stop_started(NewScaners),
