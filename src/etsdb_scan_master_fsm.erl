@@ -129,6 +129,7 @@ wait_result(timeout,#state{caller=Caller,local_scaners=Scaners}=StateData) ->
      {stop,normal,StateData#state{data=undefined,local_scaners=[]}};
 wait_result({local_scan,ReqID,From,Ack,LocalData},#state{caller=Caller,scan_req=Scan,local_scaners=Scaners,req_ref=ReqID,ack_data=AckData,data=Data}=StateData) ->
     NewScaners = lists:keydelete(From,2,Scaners),
+    lager:info("recieve ~p",[LocalData]),
     case ack(Ack,AckData) of
         {error,Error}->
             reply_to_caller(Caller,{error,Error}),
@@ -136,6 +137,7 @@ wait_result({local_scan,ReqID,From,Ack,LocalData},#state{caller=Caller,scan_req=
             {stop,normal,StateData#state{data=undefined,local_scaners=[]}};
         []->
             NewData = join_data(Scan#scan_req.join_fun,LocalData,Data),
+            lager:info("new ~p",[NewData]),
             reply_to_caller(Caller,{ok,NewData}),
             stop_started(NewScaners),
             {stop,normal,StateData#state{data=undefined,local_scaners=[]}};
