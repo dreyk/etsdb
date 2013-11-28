@@ -34,7 +34,7 @@ init([{Parent,_Ref}=Caller]) ->
 ack({Preflist,Bucket,Query,Timeout},StateData)->
     Ref = make_ref(),
     etsdb_vnode:get_query(Ref,Preflist,Bucket,Query),
-    {next_state,wait_result,StateData#state{count=length(Preflist),ack_index=[],data=[],req_ref=Ref,timeout=Timeout},StateData#state.timeout}.
+    {next_state,wait_result,StateData#state{count=length(Preflist),ack_index=[],data=[],req_ref=Ref,timeout=Timeout},Timeout}.
 
 wait_result(timeout,#state{caller=Caller,count=Count,ack_index=AckIndex,data=Data}=StateData) ->
     lager:error("timeout wait response from ~p partitions",[Count]),

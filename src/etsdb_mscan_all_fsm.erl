@@ -103,7 +103,14 @@ handle_sync_event(_Event, _From, StateName, StateData) ->
     Reply = ok,
     {reply, Reply, StateName, StateData}.
 
-handle_info({'DOWN',MonitorRef, _Type, _Object, _Info}, StateName, #state{caller=Caller,local_scaners=LocalScaners}=StateData) ->
+handle_info({'DOWN',MonitorRef, _Type, Object, Info}, StateName, #state{caller=Caller,local_scaners=LocalScaners}=StateData) ->
+    Node = if
+               is_pid(Object)->
+                   erlang:node(Object);
+               true->
+                   Object
+           end,
+    lager:erro("fail scan on ~p reason ~p",[Node,Info]),
     case lists:keymember(MonitorRef,1,LocalScaners) of
         true->
             NewScaners = lists:keydelete(MonitorRef, 1,LocalScaners),
