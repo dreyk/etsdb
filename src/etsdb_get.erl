@@ -43,6 +43,17 @@ scan(Bucket,From,To,Timeout)->
         #scan_it{}=It->
             macan(Bucket,It,Timeout)
     end.
+macan(Bucket,#scan_it{partition=all,from=From,to=To},Timeout)->
+    ReqRef = make_ref(),
+    Me = self(),
+    etsdb_mscan_all_fsm:start_link({raw,ReqRef,Me},Bucket, {scan,From,To,[]},Timeout),
+    case wait_for_results(ReqRef,client_wait_timeout(Timeout)) of
+        {ok,Res} when is_list(Res)->
+            {ok,Res};
+        Else->
+            lager:error("Bad scan responce for range (~p - ~p) ~p used timeout ~p",[From,To,Else,Timeout]),
+            etsdb_util:make_error_response(Else)
+    end;
 macan(Bucket,#scan_it{from=From,to=To}=It,Timeout)->
     ReqRef = make_ref(),
     Me = self(),
