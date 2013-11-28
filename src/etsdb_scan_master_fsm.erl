@@ -180,8 +180,10 @@ ack([{Ref,Result}|Tail],AckData)->
     end.
 
 join_data({M,F,A},NewData,OldData)->
+    lager:info("join ~p",[{{M,F,A},NewData,OldData}]),
     apply(M,F,[NewData,OldData|A]);
 join_data(Fun,NewData,OldData)->
+    lager:info("join ~p",[{Fun,NewData,OldData}]),
     Fun(NewData,OldData).
 
 handle_event(_Event, StateName, StateData) ->
