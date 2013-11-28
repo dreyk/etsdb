@@ -110,7 +110,7 @@ handle_info({'DOWN',MonitorRef, _Type, Object, Info}, StateName, #state{caller=C
                true->
                    Object
            end,
-    lager:erro("fail scan on ~p reason ~p",[Node,Info]),
+    lager:error("fail scan on ~p reason ~p",[Node,Info]),
     case lists:keymember(MonitorRef,1,LocalScaners) of
         true->
             NewScaners = lists:keydelete(MonitorRef, 1,LocalScaners),
