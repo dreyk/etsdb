@@ -20,7 +20,7 @@ scan(ScanReq,Timeout)->
         {ok,Res} when is_list(Res)->
             {ok,Res};
         Else->
-            lager:error("Bad scan responce for range (~p - ~p) ~p used timeout ~p",[ScanReq,Timeout]),
+            lager:error("Bad scan responce for ~p used timeout ~p",[ScanReq,Timeout]),
             etsdb_util:make_error_response(Else)
     end.
 

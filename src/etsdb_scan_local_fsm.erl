@@ -36,7 +36,7 @@ ack({Scan,Timeout},StateData)->
     {Count,AckIndex} = lists:foldl(fun({VNode,Scans},{CountAcc,RefAcc})->
                                            {RefAcc2,Scans1}=lists:foldl(fun({ScanRef,Scan1},{RefAcc1,ScanAcc})->
                                                                                 {[ScanRef|RefAcc1],[Scan1|ScanAcc]}
-                                                                        end,[],Scans),
+                                                                        end,{[],[]},Scans),
                                            etsdb_vnode:scan(Ref,VNode,Scans1),
                                            {CountAcc+1,[{VNode,RefAcc2}|RefAcc]}
                                    end,{0,[]},Scan#scan_req.pscan),
