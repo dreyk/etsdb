@@ -5,7 +5,7 @@
 
 -behaviour(gen_fsm).
 
--export([start/0]).
+-export([start/2,ack/5,stop/1]).
 
 
 -export([init/1, handle_event/3,wait_result/2,ack/2,
@@ -15,9 +15,15 @@
 
 -include("etsdb_request.hrl").
 
-start() ->
-    Parent = self(),
-    gen_fsm:start(?MODULE, [Parent], []).
+start(Ref,Node)->
+    Parent = {self(),Ref},
+    rpc:call(Node,gen_fsm,start,[?MODULE, [Parent], []]).
+
+stop(Name)->
+    gen_fsm:send_all_state_event(Name,stop).
+
+ack(To,Preflist,Bucket,Query,Timeout)->
+    gen_fsm:send_event(To,{Preflist,Bucket,Query,Timeout}).
 
 %%{'DOWN', _MonitorRef, _Type, _Object, Info}
 init([{Parent,_Ref}=Caller]) ->
@@ -53,6 +59,8 @@ wait_result({r,Index,ReqID,Res},#state{caller=Caller,count=Count,req_ref=ReqID,a
             {next_state,wait_result,StateData#state{ack_index=NewAckIndex,count=NewCount,data=NewData},StateData#state.timeout}
     end.
 
+handle_event(stop,_StateName, StateData) ->
+    {stop,normal, StateData#state{data=undefined}};
 handle_event(_Event, StateName, StateData) ->
     {next_state, StateName, StateData}.
 
@@ -74,4 +82,4 @@ code_change(_OldVsn, StateName, StateData, _Extra) ->
     {ok, StateName, StateData}.
 
 reply_to_caller({Name,Ref},Reply)->
-    gen_fsm:send_event(Name,{local_scan,Ref,Reply}).
+    gen_fsm:send_event(Name,{local_scan,Ref,self(),Reply}).

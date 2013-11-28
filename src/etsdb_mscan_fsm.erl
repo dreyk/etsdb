@@ -136,6 +136,8 @@ results(Index,Res,Bucket,[#results{indexes=Indexes}=Result|Results],Data,Acc)->
             case add_result(Index,Res,Bucket,Result,Data,Acc) of
                 {error,_}=Error->
                     Error;
+                {error,Data1,Acc1}->
+                    results(Index,error,Bucket,Results,Data1,Acc1);
                 {Data1,Acc1}->
                     results(Index,ok,Bucket,Results,Data1,Acc1)
             end;
@@ -160,7 +162,7 @@ add_result(_Index,error,_Bucket,#results{num_fail=Count,fail_quorum=Quorum}=Resu
         Count1==Quorum->
             {error,fail};
         true->
-            {Data,[Result#results{num_fail=Count1}|Acc]}
+            {error,Data,[Result#results{num_fail=Count1}|Acc]}
     end;
 add_result(Index,Res,Bucket,Result,Data,Acc)->
     lager:error("Cant' get data from ~p reason is ~p",[Index,Res]),
