@@ -76,7 +76,8 @@ merge_scan1(Data,Acc)->
 pscan([],Requests)->
     etsdb_util:reduce_orddict(fun merge_req_by_node/2,lists:keysort(1,Requests));
 pscan([{{VnodeIdx,NVal},Scans}|Tail],Requests)->
-   case preflist(VnodeIdx,NVal) of
+   Hash = etsdb_util:hash_for_partition(VnodeIdx),
+   case preflist(Hash,NVal) of
         {error,Error}->
             {error,Error};
         PrefList when is_list(PrefList)->
