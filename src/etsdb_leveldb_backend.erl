@@ -34,7 +34,9 @@
          save/3,
          scan/5,
          find_expired/2,
-         delete/3,stop/1,drop/1,fold_objects/3,is_empty/1]).
+         delete/3,stop/1,drop/1,fold_objects/3,is_empty/1,scan/3]).
+
+-include("etsdb_request.hrl").
 
 init(Partition, Config) ->
     %% Initialize random seed
@@ -91,22 +93,55 @@ find_expired(Bucket,#state{ref=Ref,fold_opts=FoldOpts})->
                 end
         end,
     {async,FoldFun}.
+
+scan(Scans,Acc,#state{ref=Ref,fold_opts=FoldOpts})->
+    FoldFun = fun() ->
+                      multi_scan(Scans,Ref, FoldOpts, Acc) end,
+    {async,FoldFun}.
+
+custom_scan_spec({M,F,A})->
+    apply(M,F,A++[?MODULE]);
+custom_scan_spec(Fun)->
+    Fun(?MODULE).
+
 scan(Bucket,From,To,Acc,#state{ref=Ref,fold_opts=FoldOpts})->
     {StartIterate,Fun} = Bucket:scan_spec(From,To,?MODULE),
     FoldFun = fun() ->
-                multi_fold(Ref, FoldOpts, StartIterate, Fun, Acc) end,
+                      multi_fold(reverse,Ref, FoldOpts, StartIterate, Fun, Acc) end,
     {async,FoldFun}.
 
-multi_fold(Ref,FoldOpts,StartIterate,Fun,Acc)->
+multi_scan([],_Ref,_FoldOpts,Acc)->
+    {ok,Acc};
+multi_scan([Scan|Scans],Ref,FoldOpts,Acc)->
+    {StartIterate,Fun} = custom_scan_spec(Scan#pscan_req.function),
+    case multi_fold(native,Ref,FoldOpts,StartIterate,Fun,Acc) of
+        {ok,Acc1}->
+            multi_scan(Scans,Ref,FoldOpts,Acc1);
+        Error->
+            Error
+    end.
+
+
+multi_fold(Order,Ref,FoldOpts,StartIterate,Fun,Acc)->
     try
         FoldResult = eleveldb:fold(Ref,Fun,Acc, [{first_key,StartIterate} | FoldOpts]),
-        {ok,lists:reverse(FoldResult)}
+        if
+            Order==reverse->
+                {ok,lists:reverse(FoldResult)};
+            true->
+                {ok,FoldResult}
+        end
     catch
         {coninue,{NextKey,NextFun,ConitnueAcc}} ->
-            multi_fold(Ref, FoldOpts,NextKey,NextFun,ConitnueAcc);
-        {break, AccFinal} ->
-            {ok,lists:reverse(AccFinal)}
-     end.
+multi_fold(Order,Ref, FoldOpts,NextKey,NextFun,ConitnueAcc);
+{break, AccFinal} ->
+if
+Order==reverse->
+{ok,lists:reverse(AccFinal)};
+true->
+{ok,AccFinal}
+end
+end.
 
 is_empty(#state{ref=Ref}) ->
    eleveldb:is_empty(Ref).

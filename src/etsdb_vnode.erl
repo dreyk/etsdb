@@ -38,7 +38,8 @@
          handle_exit/3,
          put_internal/3,
          put_external/4,
-         get_query/4]).
+         get_query/4,
+         scan/3]).
 
 -behaviour(riak_core_vnode).
 
@@ -59,6 +60,8 @@ put_internal(ReqID,Preflist,Data)->
 put_external(ReqID,Preflist,Bucket,Data)->
     riak_core_vnode_master:command(Preflist,#etsdb_store_req_v1{value=Data,req_id=ReqID,bucket=Bucket},{fsm,undefined,self()},etsdb_vnode_master).
 
+scan(ReqID,Vnode,Scans)->
+    riak_core_vnode_master:command([{Vnode,node()}],#etsdb_get_query_req_v1{get_query=Scans,req_id=ReqID,bucket=custom_scan},{fsm,undefined,self()},etsdb_vnode_master).
 get_query(ReqID,Preflist,Bucket,Query)->
     riak_core_vnode_master:command(Preflist,#etsdb_get_query_req_v1{get_query=Query,req_id=ReqID,bucket=Bucket},{fsm,undefined,self()},etsdb_vnode_master).
 
@@ -150,6 +153,19 @@ handle_command(?ETSDB_STORE_REQ{bucket=Bucket,value=Value,req_id=ReqID}, Sender,
     end,
     {noreply,State#state{backend_ref=NewBackEndRef}};
 
+handle_command(?ETSDB_GET_QUERY_REQ{get_query=Scans,req_id=ReqID,bucket=custom_scan}, Sender,
+               #state{backend=BackEndModule,backend_ref=BackEndRef,vnode_index=Index}=State)->
+     case do_scan(BackEndModule,BackEndRef,Scans) of
+        {async, AsyncWork} ->
+            Fun =
+                fun()->
+                        InvokeRes = AsyncWork(),
+                        {r,Index,ReqID,InvokeRes} end,
+            {async, {scan,Fun},Sender, State};
+        Result->
+            riak_core_vnode:reply(Sender, {r,Index,ReqID,Result}),
+            {noreply, State}
+    end;
 handle_command(?ETSDB_GET_QUERY_REQ{bucket=Bucket,get_query=Query,req_id=ReqID}, Sender,
                #state{backend=BackEndModule,backend_ref=BackEndRef,vnode_index=Index}=State)->
      case do_get_qyery(BackEndModule,BackEndRef,Bucket,Query) of
@@ -275,6 +291,9 @@ do_get_qyery(BackEndModule,BackEndRef,Bucket,{scan,From,To,Acc})->
     BackEndModule:scan(Bucket,From,To,Acc,BackEndRef);
 do_get_qyery(_BackEndModule,BackEndRef,_Bucket,_Query)->
     {{error,bad_query},BackEndRef}.
+
+do_scan(BackEndModule,BackEndRef,Scans)->
+    BackEndModule:scan(Scans,[],BackEndRef).
 
 clear_period(Bucket)->
     I = Bucket:clear_period(),
