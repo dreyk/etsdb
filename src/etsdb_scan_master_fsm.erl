@@ -52,7 +52,7 @@ prepare(#state{caller=Caller,scan_req=ScanReq}=StateData) ->
                                                  AckRef = erlang:make_ref(),
                                                  FailQuorum = NVal-Quorum+1,
                                                  {[{{VnodeIdx,NVal},{AckRef,Scan}}|ScanAcc],
-                                                  [{AckRef,#ack{ok_quorum=Quorum,fail_quorum=FailQuorum}}|AckAcc]} end,[],ScanReq#scan_req.pscan),
+                                                  [{AckRef,#ack{ok_quorum=Quorum,fail_quorum=FailQuorum}}|AckAcc]} end,{[],[]},ScanReq#scan_req.pscan),
     ByPartiotion1 = etsdb_util:reduce_orddict(fun merge_scan1/2,lists:keysort(1,ByPartiotion)),
     case pscan(ByPartiotion1,[]) of
         {error,Error}->
