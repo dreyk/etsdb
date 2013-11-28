@@ -136,7 +136,7 @@ wait_result({local_scan,ReqID,From,Ack,LocalData},#state{caller=Caller,scan_req=
             {stop,normal,StateData#state{data=undefined,local_scaners=[]}};
         NewAckData->
             NewData = join_data(Scan#scan_req.join_fun,LocalData,Data),
-            {next_state,wait_result, StateData#state{data=NewData,ack_data=NewAckData,local_scaners=NewScaners},StateData#state.timeout}
+            {next_state,wait_result, StateData#state{data=NewData,ack_data=NewAckData,local_scaners=NewScaners}}
     end;
 wait_result({local_scan,ReqID,From,Error},#state{caller=Caller,req_ref=ReqID,local_scaners=Scaners}=StateData) ->
     lager:error("fail scan on ~p reason ~p",[node(From),Error]),

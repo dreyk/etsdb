@@ -95,6 +95,7 @@ find_expired(Bucket,#state{ref=Ref,fold_opts=FoldOpts})->
     {async,FoldFun}.
 
 scan(Scans,Acc,#state{ref=Ref,fold_opts=FoldOpts})->
+    lager:info("start scan ~p",[Scans]),
     FoldFun = fun() ->
                       multi_scan(Scans,Ref, FoldOpts, Acc) end,
     {async,FoldFun}.
@@ -133,15 +134,15 @@ multi_fold(Order,Ref,FoldOpts,StartIterate,Fun,Acc)->
         end
     catch
         {coninue,{NextKey,NextFun,ConitnueAcc}} ->
-multi_fold(Order,Ref, FoldOpts,NextKey,NextFun,ConitnueAcc);
-{break, AccFinal} ->
-if
-Order==reverse->
-{ok,lists:reverse(AccFinal)};
-true->
-{ok,AccFinal}
-end
-end.
+            multi_fold(Order,Ref, FoldOpts,NextKey,NextFun,ConitnueAcc);
+        {break, AccFinal} ->
+            if
+                Order==reverse->
+                    {ok,lists:reverse(AccFinal)};
+                true->
+                    {ok,AccFinal}
+            end
+    end.
 
 is_empty(#state{ref=Ref}) ->
    eleveldb:is_empty(Ref).
