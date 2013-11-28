@@ -103,7 +103,7 @@ execute(timeout, #state{local_scaners=ToScan,scan_req=ScanReq,timeout=Timeout,ca
             stop_started(Started),
             {stop,Error,StateData};
         Started->
-            {next_state,wait_result, StateData#state{req_ref=Ref,local_scaners=Started},Timeout}
+            {next_state,wait_result, StateData#state{req_ref=Ref,local_scaners=Started}}
     end.
 
 start_local_fsm([],_Ref,_ScanReq,_Timeout,Monitors)->
