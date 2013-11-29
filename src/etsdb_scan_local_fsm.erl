@@ -46,17 +46,20 @@ ack({Scan,Timeout},StateData)->
                      scan=Scan#scan_req{pscan=undefined},to_ack=[],ack_index=lists:ukeysort(1,AckIndex),data=[],req_ref=Ref,timeout=Timeout},
      Timeout}.
 
-wait_result(timeout,#state{caller=Caller,count=Count}=StateData) ->
+wait_result(timeout,#state{caller=Caller,count=Count,to_ack=ToAck,ack_index=AckIndex,data=Data}=StateData) ->
     lager:error("Timeout wait response from ~p partitions",[Count]),
-    reply_to_caller(Caller,{error,timeout}),
+    NewToAck = lists:foldl(fun({_,RefToAcc},Acc)->
+                                   lists:foldl(fun(ScanRef,Acc1)->[{ScanRef,error}|Acc1] end,Acc,RefToAcc)
+                           end,ToAck,AckIndex),
+    reply_to_caller(Caller,{error,timeout},NewToAck,Data),
     {stop,normal,clear_state(StateData)};
 wait_result({r,Index,ReqID,Result},#state{caller=Caller,scan=Scan,count=Count,req_ref=ReqID,to_ack=ToAck,ack_index=AckIndex,data=Data}=StateData) ->
     NewCount = Count-1,
-    RefToAcc = case orddict:find(Index,AckIndex) of
+    {RefToAcc,NewAckIndex} = case orddict:find(Index,AckIndex) of
                    {ok,List}->
-                       List;
+                       {List,orddict:erase(Index,AckIndex)};
                    _->
-                       []
+                       {[],AckIndex}
                end,
     case Result of
         {ok,ResultData}->
@@ -72,7 +75,7 @@ wait_result({r,Index,ReqID,Result},#state{caller=Caller,scan=Scan,count=Count,re
             reply_to_caller(Caller,NewToAck,NewData),
             {stop,normal,clear_state(StateData)};
         true->
-            {next_state,wait_result,StateData#state{to_ack=NewToAck,count=NewCount,data=NewData},StateData#state.timeout}
+            {next_state,wait_result,StateData#state{to_ack=NewToAck,ack_index=NewAckIndex,count=NewCount,data=NewData},StateData#state.timeout}
     end.
 
 handle_event(stop,_StateName, StateData) ->
@@ -97,8 +100,8 @@ terminate(_Reason, _StateName, _StatData) ->
 code_change(_OldVsn, StateName, StateData, _Extra) ->
     {ok, StateName, StateData}.
 
-reply_to_caller({Name,Ref},Error)->
-    gen_fsm:send_event(Name,{local_scan,Ref,self(),Error}).
+reply_to_caller({Name,Ref},Error,Ack,LocalData)->
+    gen_fsm:send_event(Name,{local_scan,Ref,self(),Error,Ack,LocalData}).
 reply_to_caller({Name,Ref},Ack,LocalData)->
     gen_fsm:send_event(Name,{local_scan,Ref,self(),Ack,LocalData}).
 

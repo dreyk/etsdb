@@ -80,7 +80,7 @@ pscan([{{VnodeIdx,NVal},Scans}|Tail],Requests)->
    case preflist(Hash,NVal) of
         {error,Error}->
             {error,Error};
-        PrefList when is_list(PrefList)->
+        PrefList when is_list(PrefList) andalso length(PrefList)==NVal->
             Requests1 = lists:foldl(fun({VNode,Node},Acc)->
                                 [{Node,{VNode,Scans}}|Acc]
                         end,Requests,PrefList),
@@ -127,7 +127,20 @@ wait_result(timeout,#state{caller=Caller,local_scaners=Scaners}=StateData) ->
      reply_to_caller(Caller,{error,timeout}),
      stop_started(Scaners),
      {stop,normal,StateData#state{data=undefined,local_scaners=[]}};
-wait_result({local_scan,ReqID,From,Ack,LocalData},#state{caller=Caller,scan_req=Scan,local_scaners=Scaners,req_ref=ReqID,ack_data=AckData,data=Data}=StateData) ->
+
+wait_result({local_scan,ReqID,From,Error,Ack,LocalData},#state{req_ref=ReqID}=StateData) ->
+    lager:error("Fail some scan on ~p reason ~p",[node(From),Error]),
+    receive_ack(From,Ack,LocalData,StateData);
+wait_result({local_scan,ReqID,From,Ack,LocalData},#state{req_ref=ReqID}=StateData) ->
+    receive_ack(From,Ack,LocalData,StateData);
+wait_result({local_scan,ReqID,From,Error},#state{caller=Caller,req_ref=ReqID,local_scaners=Scaners}=StateData) ->
+    lager:error("fail scan on ~p reason ~p",[node(From),Error]),
+    NewScaners = lists:keydelete(From, 2,Scaners),
+    reply_to_caller(Caller,Error),
+    stop_started(NewScaners),
+    {stop,normal,StateData#state{data=undefined,local_scaners=[]}}.
+
+receive_ack(From,Ack,LocalData,#state{caller=Caller,scan_req=Scan,local_scaners=Scaners,ack_data=AckData,data=Data}=StateData)->
     NewScaners = lists:keydelete(From,2,Scaners),
     case ack(Ack,AckData) of
         {error,Error}->
@@ -142,13 +155,7 @@ wait_result({local_scan,ReqID,From,Ack,LocalData},#state{caller=Caller,scan_req=
         NewAckData->
             NewData = join_data(Scan#scan_req.join_fun,LocalData,Data),
             {next_state,wait_result, StateData#state{data=NewData,ack_data=NewAckData,local_scaners=NewScaners},StateData#state.timeout}
-    end;
-wait_result({local_scan,ReqID,From,Error},#state{caller=Caller,req_ref=ReqID,local_scaners=Scaners}=StateData) ->
-    lager:error("fail scan on ~p reason ~p",[node(From),Error]),
-    NewScaners = lists:keydelete(From, 2,Scaners),
-    reply_to_caller(Caller,Error),
-    stop_started(NewScaners),
-    {stop,normal,StateData#state{data=undefined,local_scaners=[]}}.
+    end.
 
 ack([],AckData)->
     AckData;
