@@ -149,7 +149,7 @@ receive_ack(From,Ack,LocalData,#state{caller=Caller,scan_req=Scan,local_scaners=
             {stop,normal,StateData#state{data=undefined,local_scaners=[]}};
         []->
             NewData = join_data(Scan#scan_req.join_fun,LocalData,Data),
-            reply_to_caller(Caller,{ok,NewData}),
+            reply_to_caller(Caller,{ok,final_data(Scan#scan_req.final_fun,NewData)}),
             stop_started(NewScaners),
             {stop,normal,StateData#state{data=undefined,local_scaners=[]}};
         NewAckData->
@@ -188,6 +188,12 @@ join_data({M,F,A},NewData,OldData)->
     apply(M,F,[NewData,OldData|A]);
 join_data(Fun,NewData,OldData)->
     Fun(NewData,OldData).
+final_data({M,F,A},Data)->
+    apply(M,F,[Data|A]);
+final_data(Fun,Data) when is_function(Fun)->
+    Fun(Data);
+final_data(_Fun,Data)->
+    Data.
 
 handle_event(_Event, StateName, StateData) ->
     {next_state, StateName, StateData}.

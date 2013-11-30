@@ -110,5 +110,7 @@ clear_state(State)->
 
 final_data({M,F,A},Data)->
     apply(M,F,[Data|A]);
-final_data(Fun,Data)->
-    Fun(Data).
+final_data(Fun,Data) when is_function(Data)->
+    Fun(Data);
+final_data(_Fun,Data)->
+    Data.
