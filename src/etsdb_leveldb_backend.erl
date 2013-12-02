@@ -106,16 +106,26 @@ custom_scan_spec(Fun)->
     Fun(?MODULE).
 
 scan(Bucket,From,To,Acc,#state{ref=Ref,fold_opts=FoldOpts})->
-    {StartIterate,Fun} = Bucket:scan_spec(From,To,?MODULE),
+    {StartIterate,Fun,BatchSize} = case Bucket:scan_spec(From,To,?MODULE) of
+                                       {T1,T2,T3}->
+                                           {T1,T2,T3};
+                                       {T1,T2}->
+                                           {T1,T2,1}
+                                   end,
     FoldFun = fun() ->
-                      multi_fold(reverse,Ref, FoldOpts, StartIterate, Fun, Acc) end,
+                      multi_fold(reverse,Ref, FoldOpts, StartIterate, Fun,BatchSize,Acc) end,
     {async,FoldFun}.
 
 multi_scan([],_Ref,_FoldOpts,Acc)->
     {ok,Acc};
 multi_scan([Scan|Scans],Ref,FoldOpts,Acc)->
-    {StartIterate,Fun} = custom_scan_spec(Scan#pscan_req.function),
-    case multi_fold(native,Ref,FoldOpts,StartIterate,Fun,Acc) of
+    {StartIterate,Fun,BatchSize} = case custom_scan_spec(Scan#pscan_req.function) of
+                             {T1,T2,T3}->
+                                 {T1,T2,T3};
+                             {T1,T2}->
+                                 {T1,T2,1}
+                         end,
+    case multi_fold(native,Ref,FoldOpts,StartIterate,Fun,BatchSize,Acc) of
         {ok,Acc1}->
             multi_scan(Scans,Ref,FoldOpts,Acc1);
         Error->
@@ -123,9 +133,9 @@ multi_scan([Scan|Scans],Ref,FoldOpts,Acc)->
     end.
 
 
-multi_fold(Order,Ref,FoldOpts,StartIterate,Fun,Acc)->
+multi_fold(Order,Ref,FoldOpts,StartIterate,Fun,BatchSize,Acc)->
     try
-        FoldResult = eleveldb:fold(Ref,Fun,Acc, [{first_key,StartIterate} | FoldOpts]),
+        FoldResult = eleveldb:fold(Ref,Fun,Acc, [{first_key,StartIterate} | FoldOpts],BatchSize),
         if
             Order==reverse->
                 {ok,lists:reverse(FoldResult)};
@@ -134,7 +144,7 @@ multi_fold(Order,Ref,FoldOpts,StartIterate,Fun,Acc)->
         end
     catch
         {coninue,{NextKey,NextFun,ConitnueAcc}} ->
-            multi_fold(Order,Ref, FoldOpts,NextKey,NextFun,ConitnueAcc);
+            multi_fold(Order,Ref, FoldOpts,NextKey,NextFun,BatchSize,ConitnueAcc);
         {break, AccFinal} ->
             if
                 Order==reverse->
