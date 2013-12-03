@@ -125,17 +125,31 @@ multi_scan([Scan|Scans],Ref,FoldOpts,Acc)->
                              {T1,T2}->
                                  {T1,T2,1}
                          end,
-    case multi_fold(native,Ref,FoldOpts,StartIterate,Fun,BatchSize,Acc) of
+    ExtFoldOpts = [{catch_end_of_data, Scan#pscan_req.catch_end_of_data} | FoldOpts],
+    case multi_fold(native,Ref,ExtFoldOpts,StartIterate,Fun,BatchSize,Acc) of
         {ok,Acc1}->
             multi_scan(Scans,Ref,FoldOpts,Acc1);
         Error->
             Error
     end.
 
+catch_end_of_data(false, _, Acc, _, _, _, _) ->
+    Acc;
+catch_end_of_data(true, Fun, Acc, Order, Ref, FoldOpts, BatchSize) ->
+    case Fun('end_of_data', Acc) of
+        {'next_key', KeyNext, FunNext, NewAcc} ->
+            multi_fold(Order, Ref, FoldOpts, KeyNext, FunNext, BatchSize, NewAcc);
+        {coninue,{KeyNext, FunNext, NewAcc}} ->
+            multi_fold(Order,Ref, FoldOpts,KeyNext,FunNext,BatchSize,NewAcc);
+        SomeAcc ->
+            SomeAcc
+    end.
 
 multi_fold(Order,Ref,FoldOpts,StartIterate,Fun,BatchSize,Acc)->
     try
-        FoldResult = eleveldb:fold(Ref,Fun,Acc, [{first_key,StartIterate} | FoldOpts],BatchSize),
+        FoldResult0 = eleveldb:fold(Ref,Fun,Acc, [{first_key,StartIterate} | FoldOpts],BatchSize),
+        CatchEOD = zont_data_util:propfind(catch_end_of_data, FoldOpts, false),
+        FoldResult = catch_end_of_data(CatchEOD, Fun, FoldResult0, Order, Ref, FoldOpts, BatchSize),
         if
             Order==reverse->
                 {ok,lists:reverse(FoldResult)};
