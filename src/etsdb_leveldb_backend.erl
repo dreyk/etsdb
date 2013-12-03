@@ -95,7 +95,6 @@ find_expired(Bucket,#state{ref=Ref,fold_opts=FoldOpts})->
     {async,FoldFun}.
 
 scan(Scans,Acc,#state{ref=Ref,fold_opts=FoldOpts})->
-    lager:info("start scan ~p",[Scans]),
     FoldFun = fun() ->
                       multi_scan(Scans,Ref, FoldOpts, Acc) end,
     {async,FoldFun}.
