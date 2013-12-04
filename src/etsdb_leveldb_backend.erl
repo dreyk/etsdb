@@ -137,9 +137,11 @@ catch_end_of_data(false, _, Acc, _, _, _, _) ->
 catch_end_of_data(true, Fun, Acc, Order, Ref, FoldOpts, BatchSize) ->
     case Fun('end_of_data', Acc) of
         {'next_key', KeyNext, FunNext, NewAcc} ->
-            multi_fold(Order, Ref, FoldOpts, KeyNext, FunNext, BatchSize, NewAcc);
+            {ok, R} = multi_fold(Order, Ref, FoldOpts, KeyNext, FunNext, BatchSize, NewAcc),
+            R;
         {coninue,{KeyNext, FunNext, NewAcc}} ->
-            multi_fold(Order,Ref, FoldOpts,KeyNext,FunNext,BatchSize,NewAcc);
+            {ok, R} = multi_fold(Order,Ref, FoldOpts,KeyNext,FunNext,BatchSize,NewAcc),
+            R;
         SomeAcc ->
             SomeAcc
     end.
