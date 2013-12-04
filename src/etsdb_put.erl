@@ -51,7 +51,8 @@ batch_partitions(Ring,[{{vidx,VnodeIdx},Data}|T],Acc)->
 batch_partitions(Ring,[{Partition,Data}|T],Acc)->
     Idx = crypto:hash(sha,Partition),
     VnodeIdx=riak_core_ring:responsible_index(Idx,Ring),
-    batch_partitions(Ring,T,[{VnodeIdx,Data}|Acc]).
+    VNodeHash = etsdb_util:hash_for_partition(VnodeIdx),
+    batch_partitions(Ring,T,[{VNodeHash,Data}|Acc]).
 
 join_partiotions(Partitioned)->
     SortByPartition = lists:keysort(1,Partitioned),
