@@ -72,9 +72,15 @@ prepare(timeout, #state{caller=Caller,data=Data,bucket=Bucket}=StateData) ->
     end.
 execute(timeout, #state{data=Data,bucket=Bucket,timeout=Timeout}=StateData) ->
     Ref = make_ref(),
-    lists:foreach(fun({VNode,VNodeData})->
+    Me = self(),
+    lists:foreach(fun({{Index,_}=VNode,VNodeData})->
                           PutBatch = Bucket:serialize(VNodeData),
-                          etsdb_vnode:put_external(Ref,[VNode],Bucket,PutBatch)
+                          case Bucket of
+                              demo_geohash->
+                                gen_fsm:send_event(Me,{w,Index,Ref,ok});
+                              _->
+                                  etsdb_vnode:put_external(Ref,[VNode],Bucket,PutBatch)
+                          end
                           end,Data),
     {next_state,wait_result, StateData#state{data=undefined,req_ref=Ref},Timeout}.
 
