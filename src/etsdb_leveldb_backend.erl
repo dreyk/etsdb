@@ -34,7 +34,7 @@
          save/3,
          scan/5,
          find_expired/2,
-         delete/3,stop/1,drop/1,fold_objects/3,is_empty/1,scan/3]).
+         delete/3,stop/1,drop/1,fold_objects/3,is_empty/1,scan/3,multi_scan/4,multi_scan/2]).
 
 -include("etsdb_request.hrl").
 
@@ -94,6 +94,8 @@ find_expired(Bucket,#state{ref=Ref,fold_opts=FoldOpts})->
         end,
     {async,FoldFun}.
 
+multi_scan(Scans,#state{ref=Ref,fold_opts=FoldOpts})->
+    multi_scan(Scans,Ref, FoldOpts,[]).
 scan(Scans,Acc,#state{ref=Ref,fold_opts=FoldOpts})->
     FoldFun = fun() ->
                       multi_scan(Scans,Ref, FoldOpts, Acc) end,
