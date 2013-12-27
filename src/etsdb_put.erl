@@ -49,7 +49,7 @@ batch_partitions(_,[],Acc)->
 batch_partitions(Ring,[{{vidx,VnodeIdx},Data}|T],Acc)->
     batch_partitions(Ring,T,[{VnodeIdx,Data}|Acc]);
 batch_partitions(Ring,[{Partition,Data}|T],Acc)->
-    Idx = crypto:hash(sha,Partition),
+    Idx = crypto:sha(Partition),
     VnodeIdx=riak_core_ring:responsible_index(Idx,Ring),
     VNodeHash = etsdb_util:hash_for_partition(VnodeIdx),
     batch_partitions(Ring,T,[{VNodeHash,Data}|Acc]).

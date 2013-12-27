@@ -107,52 +107,56 @@ custom_scan_spec(Fun)->
     Fun(?MODULE).
 
 scan(Bucket,From,To,Acc,#state{ref=Ref,fold_opts=FoldOpts})->
-    {StartIterate,Fun,BatchSize} = case Bucket:scan_spec(From,To,?MODULE) of
+    {StartIterate,Fun,BatchSize, Patterns} = case Bucket:scan_spec(From,To,?MODULE) of
+                                       {T1, T2, T3, T4} ->
+                                           {T1, T2, T3, T4};
                                        {T1,T2,T3}->
-                                           {T1,T2,T3};
+                                           {T1,T2,T3, undefined};
                                        {T1,T2}->
-                                           {T1,T2,1}
+                                           {T1,T2,1, undefined}
                                    end,
     FoldFun = fun() ->
-                      multi_fold(reverse,Ref, FoldOpts, StartIterate, Fun,BatchSize,Acc) end,
+                      multi_fold(reverse,Ref, FoldOpts, StartIterate, Fun,BatchSize,Acc, Patterns) end,
     {async,FoldFun}.
 
 multi_scan([],_Ref,_FoldOpts,Acc)->
     {ok,Acc};
 multi_scan([Scan|Scans],Ref,FoldOpts,Acc)->
-    {StartIterate,Fun,BatchSize} = case custom_scan_spec(Scan#pscan_req.function) of
+    {StartIterate,Fun,BatchSize, Patterns} = case custom_scan_spec(Scan#pscan_req.function) of
+                             {T1, T2, T3, T4} ->
+                                 {T1, T2, T3, T4};
                              {T1,T2,T3}->
-                                 {T1,T2,T3};
+                                 {T1,T2,T3, undefined};
                              {T1,T2}->
-                                 {T1,T2,1}
+                                 {T1,T2,1, undefined}
                          end,
     ExtFoldOpts = [{catch_end_of_data, Scan#pscan_req.catch_end_of_data} | FoldOpts],
-    case multi_fold(native,Ref,ExtFoldOpts,StartIterate,Fun,BatchSize,Acc) of
+    case multi_fold(native,Ref,ExtFoldOpts,StartIterate,Fun,BatchSize,Acc, Patterns) of
         {ok,Acc1}->
             multi_scan(Scans,Ref,FoldOpts,Acc1);
         Error->
             Error
     end.
 
-catch_end_of_data(false, _, Acc, _, _, _, _) ->
+catch_end_of_data(false, _, Acc, _, _, _, _,_) ->
     Acc;
-catch_end_of_data(true, Fun, Acc, Order, Ref, FoldOpts, BatchSize) ->
+catch_end_of_data(true, Fun, Acc, Order, Ref, FoldOpts, BatchSize, _OldPatterns) ->
     case Fun('end_of_data', Acc) of
-        {'next_key', KeyNext, FunNext, NewAcc} ->
-            {ok, R} = multi_fold(Order, Ref, FoldOpts, KeyNext, FunNext, BatchSize, NewAcc),
+        {'next_key', KeyNext, FunNext, Patterns, NewAcc} ->
+            {ok, R} = multi_fold(Order, Ref, FoldOpts, KeyNext, FunNext, BatchSize, NewAcc, Patterns),
             R;
-        {coninue,{KeyNext, FunNext, NewAcc}} ->
-            {ok, R} = multi_fold(Order,Ref, FoldOpts,KeyNext,FunNext,BatchSize,NewAcc),
+        {coninue,{KeyNext, FunNext, Patterns, NewAcc}} ->
+            {ok, R} = multi_fold(Order,Ref, FoldOpts,KeyNext,FunNext,BatchSize,NewAcc, Patterns),
             R;
         SomeAcc ->
             SomeAcc
     end.
 
-multi_fold(Order,Ref,FoldOpts,StartIterate,Fun,BatchSize,Acc)->
+multi_fold(Order,Ref,FoldOpts,StartIterate,Fun,BatchSize, Acc, Patterns)->
     try
-        FoldResult0 = eleveldb:fold(Ref,Fun,Acc, [{first_key,StartIterate} | FoldOpts],BatchSize),
+        FoldResult0 = eleveldb:fold_pattern(Ref,Fun,Acc, [{first_key,StartIterate} | FoldOpts],BatchSize, Patterns),
         CatchEOD = zont_data_util:propfind(catch_end_of_data, FoldOpts, false),
-        FoldResult = catch_end_of_data(CatchEOD, Fun, FoldResult0, Order, Ref, FoldOpts, BatchSize),
+        FoldResult = catch_end_of_data(CatchEOD, Fun, FoldResult0, Order, Ref, FoldOpts, BatchSize, Patterns),
         if
             Order==reverse->
                 {ok,lists:reverse(FoldResult)};
@@ -161,7 +165,9 @@ multi_fold(Order,Ref,FoldOpts,StartIterate,Fun,BatchSize,Acc)->
         end
     catch
         {coninue,{NextKey,NextFun,ConitnueAcc}} ->
-            multi_fold(Order,Ref, FoldOpts,NextKey,NextFun,BatchSize,ConitnueAcc);
+            multi_fold(Order,Ref, FoldOpts,NextKey,NextFun,BatchSize,ConitnueAcc, undefined);
+        {coninue,{NextKey,NextFun,ConitnueAcc, Patterns}} ->
+            multi_fold(Order,Ref, FoldOpts,NextKey,NextFun,BatchSize,ConitnueAcc, Patterns);
         {break, AccFinal} ->
             if
                 Order==reverse->
