@@ -2,7 +2,7 @@
 
 probe process("beam.smp").mark("user_trace__i4s4"){
         func_name = user_string($arg7)
-        pid = $arg1
+        pid = user_string($arg1)
         op_type = $arg3
         op_index = $arg4
         if (op_type == 0/*DT_START*/) {
@@ -10,19 +10,21 @@ probe process("beam.smp").mark("user_trace__i4s4"){
         }
         else if (op_type == 1 /*DT_END*/ ) {
              interval = gettimeofday_us() - start_time[pid,op_index,func_name]
+             fun_counter[func_name]+=1
              call_time[func_name] += interval
         }
         else if (op_type == 3) {
+            fun_counter[func_name]+=1
             call_time[func_name] += op_index
         }
 }
 
-global start_time, call_time
+global start_time, call_time,fun_counter
 
 probe end {
         printf("\t -== Call time ==-\n")
         foreach (fn in call_time-)  {
-                printf("%16s  %d\n", fn, call_time[fn])
+                printf("%16s  %d\n", fn, call_time[fn]/fun_counter[fn])
         }
         exit()
 }

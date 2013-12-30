@@ -21,7 +21,7 @@
 
 -define(DEFAULT_TIMEOUT,60000).
 
--export([put/2,put/3,prepare_data/2]).
+-export([put/2,put/3,prepare_data/2,test_console/1]).
 
 -include("etsdb_request.hrl").
 
@@ -81,3 +81,7 @@ wait_for_results(ReqRef,Timeout)->
 %%Add 50ms to operation timeout
 client_wait_timeout(Timeout)->
     Timeout + 50.
+
+test_console(Node)->
+    AF1 = fun(J,C)-> [{demo_data,I,I+1,10,10,I}||I<-lists:seq(J*C+1,J*C+C)] end,
+    [rpc:call(Node,etsdb_put,put,[demo_geohash,AF1(J,100),6000])||J<-lists:seq(1,10)].
