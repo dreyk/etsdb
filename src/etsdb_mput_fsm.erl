@@ -61,31 +61,47 @@ join_save_batch(Preflist,ToSave,Data)->
                   end,ToSave,ToSave1).
 
 prepare(timeout, #state{caller=Caller,data=Data,bucket=Bucket}=StateData) ->
+    dyntrace:p(0,0, "etsdb_mput_fsm:prepare"),
     {ok,Ring} = riak_core_ring_manager:get_my_ring(),
     UpNodes = riak_core_node_watcher:nodes(etsdb),
     case pwrite(Bucket, Ring, UpNodes,Data,[],[]) of
         {error,Error}->
+            dyntrace:p(1,0, "etsdb_mput_fsm:prepare"),
             reply_to_caller(Caller,{error,Error}),
             {stop,normal,StateData};
         {ToSave,Results}->
+            dyntrace:p(1,0, "etsdb_mput_fsm:prepare"),
             {next_state,execute,StateData#state{results=Results,data=ToSave},0}
     end.
 execute(timeout, #state{data=Data,bucket=Bucket,timeout=Timeout}=StateData) ->
+    dyntrace:p(0,0, "etsdb_mput_fsm:execute"),
     Ref = make_ref(),
     Me = self(),
     lists:foreach(fun({{Index,_}=VNode,VNodeData})->
                           PutBatch = Bucket:serialize(VNodeData),
                           case Bucket of
                               demo_geohash1->
+                                  dyntrace:p(0,Index+1,"etsdb_mput_fsm:wait_one_result"),
                                 gen_fsm:send_event(Me,{w,Index,Ref,ok});
                               _->
+                                  dyntrace:p(0,Index+1,"etsdb_mput_fsm:wait_one_result"),
                                   etsdb_vnode:put_external(Ref,[VNode],Bucket,PutBatch)
                           end
                           end,Data),
+    dyntrace:p(1,0,"etsdb_mput_fsm:execute"),
+    dyntrace:p(0,0,"etsdb_mput_fsm:wait_result"),
     {next_state,wait_result, StateData#state{data=undefined,req_ref=Ref},Timeout}.
 
 
-wait_result({w,Index,ReqID,Res},#state{caller=Caller,results=Results,req_ref=ReqID,timeout=Timeout}=StateData) ->
+wait_result({w,Index,ReqID,Res0},#state{caller=Caller,results=Results,req_ref=ReqID,timeout=Timeout}=StateData) ->
+    Res = case Res0 of
+              {Time,WriteRes} when is_integer(Time)->
+                  dyntrace:p(3,Time,"eleveldb_write"),
+                  WriteRes;
+              _ ->
+                  Res0
+          end,
+    dyntrace:p(1,Index+1,"etsdb_mput_fsm:wait_one_result"),
     case Res of
         ok->
             ok;
@@ -94,15 +110,18 @@ wait_result({w,Index,ReqID,Res},#state{caller=Caller,results=Results,req_ref=Req
     end,
     case results(Index, Res,Results,[]) of
         {error,Error}->
+            dyntrace:p(1,0,"etsdb_mput_fsm:wait_result"),
             reply_to_caller(Caller,{error,Error}),
             {stop,normal,StateData#state{results=undefined,req_ref=undefined}};
         []->
             reply_to_caller(Caller,ok),
+            dyntrace:p(1,0,"etsdb_mput_fsm:wait_result"),
             {stop,normal,StateData#state{results=undefined,req_ref=undefined}};
         NewResults->
             {next_state,wait_result, StateData#state{results=NewResults},Timeout}
     end;
 wait_result(timeout,#state{caller=Caller}=StateData) ->
+    dyntrace:p(1,0,"etsdb_mput_fsm:wait_result"),
     reply_to_caller(Caller,{error,timeout}),
     {stop,normal,StateData}.
 
