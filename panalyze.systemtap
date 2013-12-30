@@ -5,10 +5,10 @@ probe process("beam.smp").mark("user_trace__i4s4"){
         pid = $arg1
         op_type = $arg3
         op_index = $arg4
-        if (op_type == 0/*DT_START*/ && start_time[func_name] == 0) {
+        if (op_type == 0/*DT_START*/) {
             start_time[pid,op_index,func_name] = gettimeofday_us()
         }
-        else if (op_type == 1 /*DT_END*/ && start_time[func_name] > 0) {
+        else if (op_type == 1 /*DT_END*/ ) {
              interval = gettimeofday_us() - start_time[pid,op_index,func_name]
              call_time[func_name] += interval
         }
