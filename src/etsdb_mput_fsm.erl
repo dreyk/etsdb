@@ -89,7 +89,7 @@ execute(timeout, #state{data=Data,bucket=Bucket,timeout=Timeout}=StateData) ->
         (E, Acc) ->
             [E | Acc] end, lists:keysort(1,NodeData)),
     lists:foreach(fun({Node, IndexData}) ->
-        [dyntrace:p(0, Index + 1, "etsdb_mput_fsm:wait_one_result") || {Index, _} <- IndexData],
+        %%[dyntrace:p(0, Index + 1, "etsdb_mput_fsm:wait_one_result") || {Index, _} <- IndexData],
         rpc:cast(Node, ?MODULE, local_execute,[Bucket,Ref,Me,IndexData]) end, NodeData1),
     dyntrace:p(1,0,"etsdb_mput_fsm:execute"),
     dyntrace:p(0,0,"etsdb_mput_fsm:wait_result"),
@@ -108,7 +108,7 @@ wait_result({w,Index,ReqID,Res0},#state{caller=Caller,results=Results,req_ref=Re
               _ ->
                   Res0
           end,
-    dyntrace:p(1,Index+1,"etsdb_mput_fsm:wait_one_result"),
+    %%dyntrace:p(1,Index+1,"etsdb_mput_fsm:wait_one_result"),
     case Res of
         ok->
             ok;
