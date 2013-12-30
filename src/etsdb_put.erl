@@ -31,7 +31,7 @@ put(Bucket,Data)->
 put(_Bucket,[],_Timeout)->
     ok;
 put(Bucket,Data,Timeout)->
-    dyntrace:p(0,0, "etsdb_put:put"),
+    true = dyntrace:p(0,0, "etsdb_put:put"),
     PartitionedData = prepare_data(Bucket,Data),
     ReqRef = make_ref(),
     Me = self(),

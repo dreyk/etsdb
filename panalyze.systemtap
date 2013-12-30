@@ -22,7 +22,7 @@ global start_time, call_time
 probe end {
         printf("\t -== Call time ==-\n")
         foreach (fn in call_time-)  {
-                printf("%16s  %d\n", fn, call_time[fn] / 1000)
+                printf("%16s  %d\n", fn, call_time[fn])
         }
         exit()
 }
