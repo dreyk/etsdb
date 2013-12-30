@@ -78,7 +78,9 @@ execute(timeout, #state{data=Data,bucket=Bucket,timeout=Timeout}=StateData) ->
     Ref = make_ref(),
     Me = self(),
     lists:foreach(fun({{Index,_}=VNode,VNodeData})->
+                          dyntrace:p(0,0, "etsdb_mput_fsm:serialize"),
                           PutBatch = Bucket:serialize(VNodeData),
+                          dyntrace:p(1,0, "etsdb_mput_fsm:serialize"),
                           case Bucket of
                               demo_geohash1->
                                   dyntrace:p(0,Index+1,"etsdb_mput_fsm:wait_one_result"),
