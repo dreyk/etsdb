@@ -38,6 +38,7 @@
          handle_exit/3,
          put_internal/3,
          put_external/4,
+         put_external/5,
          get_query/4,
          scan/3]).
 
@@ -57,6 +58,8 @@ start_vnode(I) ->
 put_internal(ReqID,Preflist,Data)->
     riak_core_vnode_master:command(Preflist,#etsdb_innerstore_req_v1{value=Data,req_id=ReqID},{fsm,undefined,self()},etsdb_vnode_master).
 
+put_external(Caller,ReqID,Preflist,Bucket,Data)->
+    riak_core_vnode_master:command(Preflist,#etsdb_store_req_v1{value=Data,req_id=ReqID,bucket=Bucket},{fsm,undefined,Caller},etsdb_vnode_master).
 put_external(ReqID,Preflist,Bucket,Data)->
     riak_core_vnode_master:command(Preflist,#etsdb_store_req_v1{value=Data,req_id=ReqID,bucket=Bucket},{fsm,undefined,self()},etsdb_vnode_master).
 

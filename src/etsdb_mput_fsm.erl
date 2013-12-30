@@ -90,14 +90,14 @@ execute(timeout, #state{data=Data,bucket=Bucket,timeout=Timeout}=StateData) ->
             [E | Acc] end, NodeData),
     lists:foreach(fun({Node, IndexData}) ->
         [dyntrace:p(0, Index + 1, "etsdb_mput_fsm:wait_one_result") || {Index, _} <- IndexData],
-        rpc:cast(Node, ?MODULE, local_execute, IndexData) end, NodeData1),
+        rpc:cast(Node, ?MODULE, local_execute,[Bucket,Ref,Me,IndexData]) end, NodeData1),
     dyntrace:p(1,0,"etsdb_mput_fsm:execute"),
     dyntrace:p(0,0,"etsdb_mput_fsm:wait_result"),
     {next_state,wait_result, StateData#state{data=undefined,req_ref=Ref},Timeout}.
 
 local_execute(Bucket,Ref,Caller,IndexData)->
     lists:foreach(fun({Index,VNodeData})->
-            etsdb_vnode:put_external(Ref,[{Index,node()}],Bucket,VNodeData)
+            etsdb_vnode:put_external(Caller,Ref,[{Index,node()}],Bucket,VNodeData)
     end,IndexData).
 
 wait_result({w,Index,ReqID,Res0},#state{caller=Caller,results=Results,req_ref=ReqID,timeout=Timeout}=StateData) ->
