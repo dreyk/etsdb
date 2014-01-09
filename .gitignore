@@ -6,3 +6,4 @@ deps
 .project
 .settings/*
 /ebin
+*.iml
