@@ -98,7 +98,7 @@ execute(timeout, #state{data=Data,bucket=Bucket,timeout=Timeout}=StateData) ->
 
 tmp_execute(_Bucket,Ref,Caller,IndexData)->
     lists:foreach(fun({Index,_VNodeData})->
-        gen_fsm:send_event(Caller,{{w,Index,Ref,{0,ok}}})
+        gen_fsm:send_event(Caller,{w,Index,Ref,{0,ok}})
     end,IndexData).
 local_execute(Bucket,Ref,Caller,IndexData)->
     lists:foreach(fun({Index,VNodeData})->
