@@ -31,8 +31,10 @@ put(Bucket,Data)->
 put(_Bucket,[],_Timeout)->
     ok;
 put(Bucket,Data,Timeout)->
-    true = dyntrace:p(0,0, "etsdb_put:put"),
+    dyntrace:p(0,0, "etsdb_put:put"),
+    dyntrace:p(0,0, "etsdb_put:prepare_data"),
     PartitionedData = prepare_data(Bucket,Data),
+    dyntrace:p(1,0, "etsdb_put:prepare_data"),
     ReqRef = make_ref(),
     Me = self(),
     etsdb_mput_fsm:start_link({raw,ReqRef,Me}, Bucket, PartitionedData, Timeout),

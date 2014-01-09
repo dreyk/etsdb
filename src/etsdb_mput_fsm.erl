@@ -54,11 +54,11 @@ pwrite(Bucket,Ring,UpNodes,[{Partition,Data}|Datas],Results,ToSave)->
     end.
 
 join_save_batch(Preflist,ToSave,Data)->
-    ToSave1 = [{VNode,Data}||VNode<-lists:sort(Preflist)],
-    orddict:merge(fun(_,Data1,Data2)->
-                          orddict:merge(fun(_,V1,_)->
-                                               V1 end,Data1,Data2)
-                  end,ToSave,ToSave1).
+    lists:foldl(fun({Index,Node},Acc)->
+        orddict:update(Node,fun(OldIndex)->
+            orddict:update(Index,fun(OldIndexData)->
+                orddict:merge(fun(_,_V1,V2)->
+                    V2 end,OldIndexData,Data) end,Data,OldIndex) end,[{Index,Data}],Acc) end,ToSave,Preflist).
 
 prepare(timeout, #state{caller=Caller,data=Data,bucket=Bucket}=StateData) ->
     dyntrace:p(0,0, "etsdb_mput_fsm:prepare"),
@@ -77,18 +77,10 @@ execute(timeout, #state{data=Data,bucket=Bucket,timeout=Timeout}=StateData) ->
     dyntrace:p(0,0, "etsdb_mput_fsm:execute"),
     Ref = make_ref(),
     Me = self(),
-    NodeData = lists:foldl(fun({{Index,Node},VNodeData},Acc)->
-        [{Node,{Index,VNodeData}}|Acc] end,[],Data),
-    NodeData1 = etsdb_util:reduce_orddict(fun(E, '$start') ->
-        [E];
-        ('$end', Acc) ->
-            Acc;
-        (E, Acc) ->
-            [E | Acc] end, lists:keysort(1,NodeData)),
     lists:foreach(fun({Node, IndexData}) ->
         %%[dyntrace:p(0, Index + 1, "etsdb_mput_fsm:wait_one_result") || {Index, _} <- IndexData],
         %%rpc:cast(Node, ?MODULE, local_execute,[Bucket,Ref,Me,IndexData]) end, NodeData1),
-        tmp_execute(Bucket,Ref,Me,IndexData) end, NodeData1),
+        tmp_execute(Bucket,Ref,Me,IndexData) end,Data),
     dyntrace:p(1,0,"etsdb_mput_fsm:execute"),
     dyntrace:p(0,0,"etsdb_mput_fsm:wait_result"),
     {next_state,wait_result, StateData#state{data=undefined,req_ref=Ref},Timeout}.
