@@ -50,13 +50,22 @@ prepare_data(Bucket,Data)->
     batch_partitions(Bucket,Ring,Partitioned,[]).
 
 batch_partitions(Bucket,_,[],Acc)->
-    join_partiotions(Bucket,Acc);
+    dyntrace:p(0,0, "etsdb_put:join part"),
+    Acc1 = join_partiotions(Bucket,Acc),
+    dyntrace:p(1,0, "etsdb_put:join part"),
+    Acc1;
 batch_partitions(Bucket,Ring,[{{vidx,VnodeIdx},Data}|T],Acc)->
     batch_partitions(Bucket,Ring,T,[{VnodeIdx,Data}|Acc]);
 batch_partitions(Bucket,Ring,[{Partition,Data}|T],Acc)->
+    dyntrace:p(0,0, "etsdb_put:hash"),
     Idx = crypto:hash(sha,Partition),
+    dyntrace:p(1,0, "etsdb_put:hash"),
+    dyntrace:p(0,0, "etsdb_put:responsible_index"),
     VnodeIdx=riak_core_ring:responsible_index(Idx,Ring),
+    dyntrace:p(1,0, "etsdb_put:responsible_index"),
+    dyntrace:p(0,0, "etsdb_put:partition_hash"),
     VNodeHash = etsdb_util:hash_for_partition(VnodeIdx),
+    dyntrace:p(1,0, "etsdb_put:partition_hash"),
     batch_partitions(Bucket,Ring,T,[{VNodeHash,Data}|Acc]).
 
 join_partiotions(Bucket,Partitioned)->
