@@ -45,27 +45,27 @@ prepare_data(Bucket,Data)->
     Partitioned = Bucket:make_partitions(Data),
     %%DatasByUserPartition = join_partiotions(Partitioned),
     {ok,Ring} = riak_core_ring_manager:get_my_ring(),
-    batch_partitions(Ring,Partitioned,[]).
+    batch_partitions(Bucket,Ring,Partitioned,[]).
 
-batch_partitions(_,[],Acc)->
-    join_partiotions(Acc);
-batch_partitions(Ring,[{{vidx,VnodeIdx},Data}|T],Acc)->
-    batch_partitions(Ring,T,[{VnodeIdx,Data}|Acc]);
-batch_partitions(Ring,[{Partition,Data}|T],Acc)->
+batch_partitions(Bucket,_,[],Acc)->
+    join_partiotions(Bucket,Acc);
+batch_partitions(Bucket,Ring,[{{vidx,VnodeIdx},Data}|T],Acc)->
+    batch_partitions(Bucket,Ring,T,[{VnodeIdx,Data}|Acc]);
+batch_partitions(Bucket,Ring,[{Partition,Data}|T],Acc)->
     Idx = crypto:hash(sha,Partition),
     VnodeIdx=riak_core_ring:responsible_index(Idx,Ring),
     VNodeHash = etsdb_util:hash_for_partition(VnodeIdx),
-    batch_partitions(Ring,T,[{VNodeHash,Data}|Acc]).
+    batch_partitions(Bucket,Ring,T,[{VNodeHash,Data}|Acc]).
 
-join_partiotions(Partitioned)->
+join_partiotions(Bucket,Partitioned)->
     SortByPartition = lists:keysort(1,Partitioned),
-    etsdb_util:reduce_orddict(fun merge_user_data/2,SortByPartition).
+    etsdb_util:reduce_orddict(fun(A1,A2)->merge_user_data(Bucket,A1,A2) end,SortByPartition).
 
-merge_user_data(Data,'$start')->
+merge_user_data(_Bucket,Data,'$start')->
     [Data];
-merge_user_data('$end',Acc)->
-    lists:ukeysort(1,Acc);
-merge_user_data(Data,Acc)->
+merge_user_data(Bucket,'$end',Acc)->
+    Bucket:serialize(Acc);
+merge_user_data(_Bucket,Data,Acc)->
     [Data|Acc].
 
 wait_for_results(ReqRef,Timeout)->

@@ -78,10 +78,7 @@ execute(timeout, #state{data=Data,bucket=Bucket,timeout=Timeout}=StateData) ->
     Ref = make_ref(),
     Me = self(),
     NodeData = lists:foldl(fun({{Index,Node},VNodeData},Acc)->
-        dyntrace:p(0,0, "etsdb_mput_fsm:serialize"),
-        PutBatch = Bucket:serialize(VNodeData),
-        dyntrace:p(1,0, "etsdb_mput_fsm:serialize"),
-        [{Node,{Index,PutBatch}}|Acc] end,[],Data),
+        [{Node,{Index,VNodeData}}|Acc] end,[],Data),
     NodeData1 = etsdb_util:reduce_orddict(fun(E, '$start') ->
         [E];
         ('$end', Acc) ->
