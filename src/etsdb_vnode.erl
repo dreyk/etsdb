@@ -38,6 +38,7 @@
          handle_exit/3,
          put_internal/3,
          put_external/4,
+         put_external/5,
          get_query/4,
          scan/3]).
 
@@ -57,6 +58,8 @@ start_vnode(I) ->
 put_internal(ReqID,Preflist,Data)->
     riak_core_vnode_master:command(Preflist,#etsdb_innerstore_req_v1{value=Data,req_id=ReqID},{fsm,undefined,self()},etsdb_vnode_master).
 
+put_external(Caller,ReqID,Preflist,Bucket,Data)->
+    riak_core_vnode_master:command(Preflist,#etsdb_store_req_v1{value=Data,req_id=ReqID,bucket=Bucket},{fsm,undefined,Caller},etsdb_vnode_master).
 put_external(ReqID,Preflist,Bucket,Data)->
     riak_core_vnode_master:command(Preflist,#etsdb_store_req_v1{value=Data,req_id=ReqID,bucket=Bucket},{fsm,undefined,self()},etsdb_vnode_master).
 
@@ -145,11 +148,14 @@ handle_command({clear_db,Bucket}, Sender,
 %%Receive command to store data in user format.
 handle_command(?ETSDB_STORE_REQ{bucket=Bucket,value=Value,req_id=ReqID}, Sender,
                #state{backend=BackEndModule,backend_ref=BackEndRef,vnode_index=Index}=State)->
+    Start = os:timestamp(),
     case BackEndModule:save(Bucket,Value,BackEndRef) of
         {Result,NewBackEndRef}->
-            riak_core_vnode:reply(Sender, {w,Index,ReqID,Result});
+            Delta = timer:now_diff(os:timestamp(),Start),
+            riak_core_vnode:reply(Sender, {w,Index,ReqID,{Delta,Result}});
         {error,Reason,NewBackEndRef}->
-            riak_core_vnode:reply(Sender, {w,Index,ReqID,{error,Reason}})
+            Delta = timer:now_diff(os:timestamp(),Start),
+            riak_core_vnode:reply(Sender, {w,Index,ReqID,{Delta,{error,Reason}}})
     end,
     {noreply,State#state{backend_ref=NewBackEndRef}};
 

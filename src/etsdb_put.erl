@@ -21,7 +21,7 @@
 
 -define(DEFAULT_TIMEOUT,60000).
 
--export([put/2,put/3,prepare_data/2]).
+-export([put/2,put/3,prepare_data/2,test_console/1]).
 
 -include("etsdb_request.hrl").
 
@@ -31,38 +31,48 @@ put(Bucket,Data)->
 put(_Bucket,[],_Timeout)->
     ok;
 put(Bucket,Data,Timeout)->
+    dyntrace:p(0,0, "etsdb_put:put"),
+    dyntrace:p(0,0, "etsdb_put:prepare_data"),
     PartitionedData = prepare_data(Bucket,Data),
+    dyntrace:p(1,0, "etsdb_put:prepare_data"),
     ReqRef = make_ref(),
     Me = self(),
     etsdb_mput_fsm:start_link({raw,ReqRef,Me}, Bucket, PartitionedData, Timeout),
-    wait_for_results(ReqRef,client_wait_timeout(Timeout)).
+    Res = wait_for_results(ReqRef,client_wait_timeout(Timeout)),
+    dyntrace:p(1,0, "etsdb_put:put"),
+    Res.
 
 
 prepare_data(Bucket,Data)->
+    dyntrace:p(0,0, "etsdb_put:make_part"),
     Partitioned = Bucket:make_partitions(Data),
+    dyntrace:p(1,0, "etsdb_put:make_part"),
     %%DatasByUserPartition = join_partiotions(Partitioned),
     {ok,Ring} = riak_core_ring_manager:get_my_ring(),
-    batch_partitions(Ring,Partitioned,[]).
+    dyntrace:p(0,0, "etsdb_put:make_batch"),
+    Res = batch_partitions(Bucket,Ring,Partitioned,[]),
+    dyntrace:p(1,0, "etsdb_put:make_batch"),
+    Res.
 
-batch_partitions(_,[],Acc)->
-    join_partiotions(Acc);
-batch_partitions(Ring,[{{vidx,VnodeIdx},Data}|T],Acc)->
-    batch_partitions(Ring,T,[{VnodeIdx,Data}|Acc]);
-batch_partitions(Ring,[{Partition,Data}|T],Acc)->
+batch_partitions(Bucket,_,[],Acc)->
+    join_partiotions(Bucket,Acc);
+batch_partitions(Bucket,Ring,[{{vidx,VnodeIdx},Data}|T],Acc)->
+    batch_partitions(Bucket,Ring,T,[{VnodeIdx,Data}|Acc]);
+batch_partitions(Bucket,Ring,[{Partition,Data}|T],Acc)->
     Idx = crypto:hash(sha,Partition),
     VnodeIdx=riak_core_ring:responsible_index(Idx,Ring),
     VNodeHash = etsdb_util:hash_for_partition(VnodeIdx),
-    batch_partitions(Ring,T,[{VNodeHash,Data}|Acc]).
+    batch_partitions(Bucket,Ring,T,[{VNodeHash,Data}|Acc]).
 
-join_partiotions(Partitioned)->
+join_partiotions(Bucket,Partitioned)->
     SortByPartition = lists:keysort(1,Partitioned),
-    etsdb_util:reduce_orddict(fun merge_user_data/2,SortByPartition).
+    etsdb_util:reduce_orddict(fun(A1,A2)->merge_user_data(Bucket,A1,A2) end,SortByPartition).
 
-merge_user_data(Data,'$start')->
+merge_user_data(_Bucket,Data,'$start')->
     [Data];
-merge_user_data('$end',Acc)->
-    lists:ukeysort(1,Acc);
-merge_user_data(Data,Acc)->
+merge_user_data(Bucket,'$end',Acc)->
+    Bucket:serialize(Acc);
+merge_user_data(_Bucket,Data,Acc)->
     [Data|Acc].
 
 wait_for_results(ReqRef,Timeout)->
@@ -78,3 +88,7 @@ wait_for_results(ReqRef,Timeout)->
 %%Add 50ms to operation timeout
 client_wait_timeout(Timeout)->
     Timeout + 50.
+
+test_console(Node)->
+    AF1 = fun(J,C)-> [{demo_data,I,I+1,10,10,I}||I<-lists:seq(J*C+1,J*C+C)] end,
+    [rpc:call(Node,etsdb_put,put,[demo_geohash,AF1(J,100),6000])||J<-lists:seq(1,10)].
