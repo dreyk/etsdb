@@ -31,28 +31,18 @@ put(Bucket,Data)->
 put(_Bucket,[],_Timeout)->
     ok;
 put(Bucket,Data,Timeout)->
-    dyntrace:p(0,0, "etsdb_put:put"),
-    dyntrace:p(0,0, "etsdb_put:prepare_data"),
     PartitionedData = prepare_data(Bucket,Data),
-    dyntrace:p(1,0, "etsdb_put:prepare_data"),
     ReqRef = make_ref(),
     Me = self(),
     etsdb_mput_fsm:start_link({raw,ReqRef,Me}, Bucket, PartitionedData, Timeout),
-    Res = wait_for_results(ReqRef,client_wait_timeout(Timeout)),
-    dyntrace:p(1,0, "etsdb_put:put"),
-    Res.
+    wait_for_results(ReqRef,client_wait_timeout(Timeout)).
 
 
 prepare_data(Bucket,Data)->
-    dyntrace:p(0,0, "etsdb_put:make_part"),
     Partitioned = Bucket:make_partitions(Data),
-    dyntrace:p(1,0, "etsdb_put:make_part"),
     %%DatasByUserPartition = join_partiotions(Partitioned),
     {ok,Ring} = riak_core_ring_manager:get_my_ring(),
-    dyntrace:p(0,0, "etsdb_put:make_batch"),
-    Res = batch_partitions(Bucket,Ring,Partitioned,[]),
-    dyntrace:p(1,0, "etsdb_put:make_batch"),
-    Res.
+    batch_partitions(Bucket,Ring,Partitioned,[]).
 
 batch_partitions(Bucket,_,[],Acc)->
     join_partiotions(Bucket,Acc);
