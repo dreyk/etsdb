@@ -44,28 +44,24 @@ put(Bucket,Data,Timeout)->
 
 
 prepare_data(Bucket,Data)->
+    dyntrace:p(0,0, "etsdb_put:make_part"),
     Partitioned = Bucket:make_partitions(Data),
+    dyntrace:p(1,0, "etsdb_put:make_part"),
     %%DatasByUserPartition = join_partiotions(Partitioned),
     {ok,Ring} = riak_core_ring_manager:get_my_ring(),
-    batch_partitions(Bucket,Ring,Partitioned,[]).
+    dyntrace:p(0,0, "etsdb_put:make_batch"),
+    Res = batch_partitions(Bucket,Ring,Partitioned,[]),
+    dyntrace:p(1,0, "etsdb_put:make_batch"),
+    Res.
 
 batch_partitions(Bucket,_,[],Acc)->
-    dyntrace:p(0,0, "etsdb_put:join part"),
-    Acc1 = join_partiotions(Bucket,Acc),
-    dyntrace:p(1,0, "etsdb_put:join part"),
-    Acc1;
+    join_partiotions(Bucket,Acc);
 batch_partitions(Bucket,Ring,[{{vidx,VnodeIdx},Data}|T],Acc)->
     batch_partitions(Bucket,Ring,T,[{VnodeIdx,Data}|Acc]);
 batch_partitions(Bucket,Ring,[{Partition,Data}|T],Acc)->
-    dyntrace:p(0,0, "etsdb_put:hash"),
     Idx = crypto:hash(sha,Partition),
-    dyntrace:p(1,0, "etsdb_put:hash"),
-    dyntrace:p(0,0, "etsdb_put:responsible_index"),
     VnodeIdx=riak_core_ring:responsible_index(Idx,Ring),
-    dyntrace:p(1,0, "etsdb_put:responsible_index"),
-    dyntrace:p(0,0, "etsdb_put:partition_hash"),
     VNodeHash = etsdb_util:hash_for_partition(VnodeIdx),
-    dyntrace:p(1,0, "etsdb_put:partition_hash"),
     batch_partitions(Bucket,Ring,T,[{VNodeHash,Data}|Acc]).
 
 join_partiotions(Bucket,Partitioned)->
