@@ -21,7 +21,7 @@
 
 -behaviour(gen_fsm).
 
--export([start_link/4,local_execute/4]).
+-export([start_link/4]).
 
 
 -export([init/1, execute/2,wait_result/2,prepare/2, handle_event/3,
@@ -74,12 +74,12 @@ execute(timeout, #state{data=Data,bucket=Bucket,timeout=Timeout}=StateData) ->
     Ref = make_ref(),
     Me = self(),
     lists:foreach(fun({Node, IndexData}) ->
-        rpc:cast(Node, ?MODULE, local_execute,[Bucket,Ref,Me,IndexData]) end,Data),
+        local_execute(Bucket,Ref,Me,IndexData,Node) end,Data),
     {next_state,wait_result, StateData#state{data=undefined,req_ref=Ref},Timeout}.
 
-local_execute(Bucket,Ref,Caller,IndexData)->
+local_execute(Bucket,Ref,Caller,IndexData,Node)->
     lists:foreach(fun({Index,VNodeData})->
-            etsdb_vnode:put_external(Caller,Ref,[{Index,node()}],Bucket,VNodeData)
+            etsdb_vnode:put_external(Caller,Ref,[{Index,Node}],Bucket,VNodeData)
     end,IndexData).
 
 wait_result({w,Index,ReqID,Res0},#state{caller=Caller,results=Results,req_ref=ReqID,timeout=Timeout}=StateData) ->
