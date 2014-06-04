@@ -28,20 +28,21 @@
      handle_sync_event/4, handle_info/3, terminate/3, code_change/4]).
 
 -record(results,{num_ok=0,num_fail=0,ok_quorum=0,fail_quorum=0,errors=[]}).
--record(state, {caller,preflist,partition,data,timeout,bucket,results,req_ref}).
+-record(state, {result_hadler,preflist,partition,data,timeout,bucket,results,req_ref}).
 
-start_link(Caller,Partition,Bucket,Data,Timeout) ->
-    gen_fsm:start_link(?MODULE, [Caller,Partition,Bucket,Data,Timeout], []).
+start_link(ResultHandler,Partition,Bucket,Data,Timeout) ->
+    gen_fsm:start_link(?MODULE, [ResultHandler,Partition,Bucket,Data,Timeout], []).
 
-init([Caller,Partition,Bucket,Data,Timeout]) ->
-    {ok,prepare, #state{caller=Caller,partition=Partition,bucket=Bucket,timeout=Timeout,data=Data},0}.
+init([ResultHandler,Partition,Bucket,Data,Timeout]) ->
+    {ok,prepare, #state{result_hadler = ResultHandler,partition=Partition,bucket=Bucket,timeout=Timeout,data=Data},0}.
 
 
-prepare(timeout, #state{caller=Caller,partition=Partition,bucket=Bucket}=StateData) ->
+prepare(timeout, #state{result_hadler  = ResultHandler,partition=Partition,bucket=Bucket}=StateData) ->
     WriteCount = Bucket:w_val(),
-    case preflist(Partition,WriteCount) of
+    VNodeHash = etsdb_util:hash_for_partition(Partition),
+    case preflist(VNodeHash,WriteCount) of
         {error,Error}->
-            reply_to_caller(Caller,{error,Error}),
+            reply_to_caller(ResultHandler,{error,Error}),
             {stop,normal,StateData};
         Preflist when length(Preflist)==WriteCount->
             NumOk = Bucket:w_quorum(),
@@ -49,26 +50,25 @@ prepare(timeout, #state{caller=Caller,partition=Partition,bucket=Bucket}=StateDa
             {next_state,execute,StateData#state{preflist=Preflist,results=#results{ok_quorum=NumOk,fail_quorum=NumFail}},0};
         Preflist->
             lager:error("Insufficient vnodes in preflist ~p must be ~p",[length(Preflist),WriteCount]),
-            reply_to_caller(Caller,{error,insufficient_vnodes}),
+            reply_to_caller(ResultHandler,{error,insufficient_vnodes}),
             {stop,normal,StateData}
     end.
 execute(timeout, #state{preflist=Preflist,data=Data,bucket=Bucket,timeout=Timeout}=StateData) ->
     Ref = make_ref(),
-    PutBatch = Bucket:serialize(Data),
-    etsdb_vnode:put_external(Ref,Preflist,Bucket,PutBatch),
+    etsdb_vnode:put_external(Ref,Preflist,Bucket,Data),
     {next_state,wait_result, StateData#state{data=undefined,req_ref=Ref},Timeout}.
 
 
-wait_result({w,Index,ReqID,Res},#state{caller=Caller,results=Results,req_ref=ReqID,timeout=Timeout}=StateData) ->
+wait_result({w,Index,ReqID,Res},#state{result_hadler = ResaultHandler,results=Results,req_ref=ReqID,timeout=Timeout}=StateData) ->
     case add_result(Index, Res, Results) of
         #results{}=NewResult->
             {next_state,wait_result, StateData#state{results=NewResult},Timeout};
         ResultToReply->
-             reply_to_caller(Caller,ResultToReply),
+             reply_to_caller(ResaultHandler,ResultToReply),
              {stop,normal,StateData}
     end;
-wait_result(timeout,#state{caller=Caller}=StateData) ->
-    reply_to_caller(Caller,{error,timeout}),
+wait_result(timeout,#state{result_hadler = ResaultHandler}=StateData) ->
+    reply_to_caller(ResaultHandler,{error,timeout}),
     {stop,normal,StateData}.
 
 
@@ -89,8 +89,11 @@ terminate(_Reason, _StateName, _StatData) ->
 code_change(_OldVsn, StateName, StateData, _Extra) ->
     {ok, StateName, StateData}.
 
+reply_to_caller(Fun,Reply) when is_function(Fun)->
+    Fun(Reply);
 reply_to_caller({raw,Ref,To},Reply)->
     To ! {Ref,Reply}.
+
 
 preflist(Partition,WVal)->
     etsdb_apl:get_apl(Partition,WVal).
