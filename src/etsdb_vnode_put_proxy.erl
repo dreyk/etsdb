@@ -34,7 +34,7 @@
 
 -define(SERVER, ?MODULE).
 
--record(state, {partition,data=[],count=0,callers=[],max_count=1000,bucket,timeout=Timeout}).
+-record(state, {partition,data=[],count=0,callers=[],max_count=1000,bucket,timeout}).
 
 put(AccHandler,ProxyName,Bucket,Data)->
     {ok,Ring} = riak_core_ring_manager:get_my_ring(),
