@@ -148,14 +148,12 @@ handle_command({clear_db,Bucket}, Sender,
 %%Receive command to store data in user format.
 handle_command(?ETSDB_STORE_REQ{bucket=Bucket,value=Value,req_id=ReqID}, Sender,
                #state{backend=BackEndModule,backend_ref=BackEndRef,vnode_index=Index}=State)->
-    Start = os:timestamp(),
     case BackEndModule:save(Bucket,Value,BackEndRef) of
         {Result,NewBackEndRef}->
-            Delta = timer:now_diff(os:timestamp(),Start),
-            riak_core_vnode:reply(Sender, {w,Index,ReqID,{Delta,Result}});
+
+            riak_core_vnode:reply(Sender, {w,Index,ReqID,Result});
         {error,Reason,NewBackEndRef}->
-            Delta = timer:now_diff(os:timestamp(),Start),
-            riak_core_vnode:reply(Sender, {w,Index,ReqID,{Delta,{error,Reason}}})
+            riak_core_vnode:reply(Sender, {w,Index,ReqID,{error,Reason}})
     end,
     {noreply,State#state{backend_ref=NewBackEndRef}};
 
