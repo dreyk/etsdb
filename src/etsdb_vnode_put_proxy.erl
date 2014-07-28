@@ -36,45 +36,14 @@
 
 -record(state, {partition,data=[],count=0,callers=[],max_count=1000,bucket,timeout=Timeout}).
 
-
-put(ProxyName,Bucket,Data,Timeout)->
-    Ref = erlang:make_ref(),
-    From = {Ref,self()},
-    BucketPartiotion = Bucket:make_partitions(Data),
+put(AccHandler,ProxyName,Bucket,Data)->
     {ok,Ring} = riak_core_ring_manager:get_my_ring(),
-    Partitioned = lists:foldl(fun({Key,Data},Acc)->
-        Idx = crypto:hash(sha,Key),
-        Partition=riak_core_ring:responsible_index(Idx,Ring),
-        [{Partition,Data}|Acc] end,[],BucketPartiotion),
-    SortByPartition = lists:keysort(1,Partitioned),
-    DataToWrite = etsdb_util:reduce_orddict(fun(A1,A2)->merge_partiotion_data(Bucket,A1,A2) end,SortByPartition),
-    WaitCount = lists:foldl(fun({Partition,SerializedData},Acc)->
-        To = reg_name(ProxyName,Partition,Bucket),
-        gen_server:cast(To,{put,From,SerializedData}),
-        Acc+1 end,0,DataToWrite),
-    wait_result(WaitCount,Timeout,Ref).
-
-wait_result(0,_Timeout,_Ref)->
-    ok;
-wait_result(WaitCount,Timeout,Ref)->
-    receive
-        {Ref,ok}->
-            wait_result(WaitCount,Timeout,Ref);
-        {Ref,{error,Else}}->
-            {error,Else};
-        {Ref,Else}->
-            {error,Else}
-    after Timeout->
-        {error,timeout}
-    end,
-    wait_result(WaitCount-1,Timeout,Ref).
-
-merge_partiotion_data(_Bucket,Data,'$start')->
-    [Data];
-merge_partiotion_data(Bucket,'$end',Acc)->
-    Bucket:serialize(Acc);
-merge_partiotion_data(_Bucket,Data,Acc)->
-    [Data|Acc].
+    [{PartitionKey,NewDataData}] = Bucket:make_partitions(Data),
+    Idx = crypto:hash(sha,PartitionKey),
+    Partition=riak_core_ring:responsible_index(Idx,Ring),
+    To = reg_name(ProxyName,Partition,Bucket),
+    SerializedData = Bucket:serialize(NewDataData),
+    gen_server:cast(To,{put,AccHandler,SerializedData}).
 
 reg_name(Name,Partition,Bucket)->
     FullName=Name++"_etsb_vproxy_"++atom_to_list(Bucket)++"_"++integer_to_list(Partition),
@@ -147,7 +116,7 @@ timeout(_)->
 start_process(Partition,Bucket,Callers,Buffer,Timeout)->
     ResultHandler = fun(Result)->
         lists:foreach(fun(Caller)->
-            reply_to_caller(Caller,Result),
+            reply_to_caller(Caller,Result)
         end,Callers) end,
     case etsdb_put_fsm:start_link(ResultHandler,Partition,Bucket,Buffer,Timeout) of
         {ok,Pid} when is_pid(Pid)->
@@ -157,6 +126,8 @@ start_process(Partition,Bucket,Callers,Buffer,Timeout)->
             ResultHandler({error,put_failed})
     end.
 
+reply_to_caller(AccFunc,Msg) when is_function(AccFunc)->
+    AccFunc(Msg);
 reply_to_caller({sync,From},Msg)->
     gen_server:reply(From,Msg);
 reply_to_caller({Ref,From},Msg)->
