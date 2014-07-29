@@ -38,11 +38,11 @@
 
 put(AccHandler,ProxyName,Bucket,Data)->
     {ok,Ring} = riak_core_ring_manager:get_my_ring(),
-    [{PartitionKey,NewDataData}] = Bucket:make_partitions(Data),
+    [{PartitionKey,_}|_] = Bucket:make_partitions(Data),
     Idx = crypto:hash(sha,PartitionKey),
     Partition=riak_core_ring:responsible_index(Idx,Ring),
     To = reg_name(ProxyName,Partition,Bucket),
-    SerializedData = Bucket:serialize(NewDataData),
+    SerializedData = Bucket:serialize(Data),
     gen_server:cast(To,{put,AccHandler,SerializedData}).
 
 reg_name(Name,Partition,Bucket)->
