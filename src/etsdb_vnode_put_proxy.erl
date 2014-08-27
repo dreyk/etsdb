@@ -22,7 +22,7 @@
 -behaviour(gen_server).
 
 %% API
--export([start_link/3,reg_name/2,put/3]).
+-export([start_link/4,reg_name/2,put/3]).
 
 %% gen_server callbacks
 -export([init/1,

@@ -20,7 +20,7 @@ start_link(Bucket,BufferSize,Timeout) ->
     supervisor:start_link(?MODULE, [Bucket,BufferSize,Timeout]).
 
 init([Bucket,BufferSize,Timeout]) ->
-    {ok, Ring} = get_my_ring(),
+    {ok,Ring} = riak_core_ring_manager:get_my_ring(),
     ProxyWorkers = [{etsdb_vnode_put_proxy:reg_name(I, Bucket),
         {etsdb_vnode_put_proxy, start_link, [I, Bucket, BufferSize, Timeout]},
         permanent, 5000, worker, [etsdb_vnode_put_proxy]} || {I, _} <- riak_core_ring:all_owners(Ring)],
