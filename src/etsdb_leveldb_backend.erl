@@ -154,7 +154,12 @@ catch_end_of_data(true, Fun, Acc, Order, Ref, FoldOpts, BatchSize, _OldPatterns)
 
 multi_fold(Order,Ref,FoldOpts,StartIterate,Fun,BatchSize, Acc, Patterns)->
     try
-        FoldResult0 = eleveldb:fold_pattern(Ref,Fun,Acc, [{first_key,StartIterate} | FoldOpts],BatchSize, Patterns),
+        FoldResult0 = case BatchSize>1 of
+                          true->
+                              eleveldb:fold_pattern(Ref,Fun,Acc, [{first_key,StartIterate} | FoldOpts],BatchSize, Patterns);
+                          _->
+                              eleveldb:fold(Ref,Fun,Acc,[{first_key,StartIterate} | FoldOpts])
+                             end,
         CatchEOD = zont_data_util:propfind(catch_end_of_data, FoldOpts, false),
         FoldResult = catch_end_of_data(CatchEOD, Fun, FoldResult0, Order, Ref, FoldOpts, BatchSize, Patterns),
         if
