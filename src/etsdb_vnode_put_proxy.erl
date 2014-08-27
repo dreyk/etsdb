@@ -22,7 +22,7 @@
 -behaviour(gen_server).
 
 %% API
--export([start_link/4,reg_name/3,put/4]).
+-export([start_link/3,reg_name/2,put/3]).
 
 %% gen_server callbacks
 -export([init/1,
@@ -36,29 +36,29 @@
 
 -record(state, {partition,data=[],count=0,callers=[],max_count=1000,bucket,timeout}).
 
-put(AccHandler,ProxyName,Bucket,Data)->
+put(AccHandler,Bucket,Data)->
     {ok,Ring} = riak_core_ring_manager:get_my_ring(),
     [{PartitionKey,_}|_] = Bucket:make_partitions(Data),
     Idx = crypto:hash(sha,PartitionKey),
     Partition=riak_core_ring:responsible_index(Idx,Ring),
-    To = reg_name(ProxyName,Partition,Bucket),
+    To = reg_name(Partition,Bucket),
     SerializedData = Bucket:serialize(Data),
     gen_server:cast(To,{put,AccHandler,SerializedData}).
 
-reg_name(Name,Partition,Bucket)->
-    FullName=Name++"_etsb_vproxy_"++atom_to_list(Bucket)++"_"++integer_to_list(Partition),
+reg_name(Partition,Bucket)->
+    FullName="etsb_v_put_proxy_"++atom_to_list(Bucket)++"_"++integer_to_list(Partition),
     list_to_atom(FullName).
 
-start_link(Name,Partition,Bucket,Timeout) ->
-    RegName = reg_name(Name,Partition,Bucket),
-    gen_server:start_link({local, RegName}, ?MODULE, [Partition,Bucket,Timeout], []).
+start_link(Partition,Bucket,BufferSize,Timeout) ->
+    RegName = reg_name(Partition,Bucket),
+    gen_server:start_link({local, RegName}, ?MODULE, [Partition,Bucket,BufferSize,Timeout], []).
 
 %%%===================================================================
 %%% gen_server callbacks
 %%%===================================================================
 
-init([Partition,Bucket,Timeout]) ->
-    {ok, #state{partition = Partition,bucket=Bucket,timeout = Timeout}}.
+init([Partition,Bucket,BufferSize,Timeout]) ->
+    {ok, #state{partition = Partition,bucket=Bucket,timeout = Timeout,max_count = BufferSize}}.
 
 handle_call({put,Data},From, State) ->
     Caller = {sycn,From},
@@ -84,7 +84,6 @@ handle_info(_Info, State) ->
 terminate(normal, _State) ->
     ok;
 terminate(Reason, #state{partition = Vnode}) ->
-    %%TODO maybe send reply
     lager:error("etsdb_vnode_put_proxy[~p] failed ~p",[Vnode,Reason]),
     ok.
 

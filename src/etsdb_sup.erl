@@ -46,7 +46,10 @@ init(_Args) ->
                            ],
     ClirntWorkerPool = {etsdb_client_worker, {poolboy, start_link, [ClientWorkerPoolArgs]},
                         permanent, 5000, worker, [poolboy]},
-    All = [VMaster,ClirntWorkerPool],
+    ProxySupervisor = {etsdb_vnode_put_proxy_sup,
+        {etsdb_vnode_put_proxy_sup, start_link, []},
+        permanent, 5000, supervisor, [etsdb_vnode_put_proxy_sup]},
+    All = [VMaster,ClirntWorkerPool,ProxySupervisor],
     { ok,
         { {one_for_one, 5, 10},
           All}}.
