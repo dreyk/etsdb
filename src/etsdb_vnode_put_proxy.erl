@@ -110,7 +110,7 @@ add_data(Caller,Data,#state{data=Buffer,count=Count,callers=Callers,max_count=Ma
 timeout(#state{count=0})->
     infinity;
 timeout(_)->
-    1.
+    0.
 
 start_process(Partition,Bucket,Callers,Buffer,Timeout)->
     ResultHandler = fun(Result)->
