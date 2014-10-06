@@ -186,9 +186,9 @@ is_empty(#state{ref=Ref}) ->
    eleveldb:is_empty(Ref).
 
 fold_objects(FoldObjectsFun, Acc, #state{fold_opts=FoldOpts,ref=Ref}) ->  
-    FoldFun = fun({StorageKey, Value}, Acc) ->
+    FoldFun = fun({StorageKey, Value}, Acc1) ->
                       try
-                          FoldObjectsFun(StorageKey, Value, Acc)
+                          FoldObjectsFun(StorageKey, Value, Acc1)
                       catch
                           stop_fold->
                                   throw({break, Acc})
