@@ -49,7 +49,10 @@ init(_Args) ->
     ProxySupervisor = {etsdb_vnode_put_proxy_sup,
         {etsdb_vnode_put_proxy_sup, start_link, []},
         permanent, 5000, supervisor, [etsdb_vnode_put_proxy_sup]},
-    All = [VMaster,ClirntWorkerPool,ProxySupervisor],
+    AeeSupervisor = {etsdb_aee_sup,
+                       {etsdb_aee_sup, start_link, []},
+                       permanent, 5000, supervisor, [etsdb_aee_sup]},
+    All = [VMaster,ClirntWorkerPool,ProxySupervisor, AeeSupervisor],
     { ok,
         { {one_for_one, 5, 10},
           All}}.

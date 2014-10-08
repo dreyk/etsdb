@@ -48,7 +48,7 @@
 -include_lib("riak_core/include/riak_core_vnode.hrl").
 
 %%vnode state
--record(state,{delete_mod,vnode_index,backend,backend_ref}).
+-record(state,{delete_mod,vnode_index,backend,backend_ref,aee_ref}).
 
 %%Start vnode
 start_vnode(I) ->
@@ -73,12 +73,19 @@ init([Index]) ->
     DeleteMode = app_helper:get_env(etsdb, delete_mode, 3000),
     %%{BackEndModule,BackEndProps} = app_helper:get_env(etsdb, backend,{etsdb_ets_backend,[]}),
     {BackEndModule,BackEndProps} = app_helper:get_env(etsdb, backend,{etsdb_leveldb_backend,[{data_root,"./data/leveldb"}]}),
-    %%Start storage backend
+    %%Start storage backend,
+    AeeRef = case etsdb_aee_sup:start_aee(Index) of
+                 {ok, ARef} ->
+                     ARef;
+                 {error, Reason} ->
+                     error(Reason),
+                     undefined
+             end,
     case BackEndModule:init(Index,BackEndProps) of
         {ok,Ref}->
             RBuckets = app_helper:get_env(etsdb,registered_bucket),
             start_clear_buckets(RBuckets),
-            {ok,#state{vnode_index=Index,delete_mod=DeleteMode,backend=BackEndModule,backend_ref=Ref},[{pool,etsdb_vnode_worker, 10, []}]};
+            {ok,#state{vnode_index=Index,delete_mod=DeleteMode,backend=BackEndModule,backend_ref=Ref, aee_ref = AeeRef},[{pool,etsdb_vnode_worker, 10, []}]};
         {error,Else}->
             {error,Else}
     end.
@@ -109,10 +116,11 @@ handle_command({remove_expired,Bucket,{expired_records,{0,_Records}}}, _Sender,
     riak_core_vnode:send_command_after(clear_period(Bucket),{clear_db,Bucket}),
     {noreply,State};
 handle_command({remove_expired,Bucket,{expired_records,{Count,Records}}}, _Sender,
-               #state{backend=BackEndModule,backend_ref=BackEndRef,vnode_index=Index}=State)->
+               #state{backend=BackEndModule,backend_ref=BackEndRef,vnode_index=Index, aee_ref = AeeRef}=State)->
     ToDelete = lists:usort(Records),
     case BackEndModule:delete(Bucket,ToDelete,BackEndRef) of
         {ok,NewBackEndRef}->
+            etsdb_aee:expire(AeeRef, Index, Bucket, ToDelete),
             ok;
         {error,Reason,NewBackEndRef}->
             lager:error("Can't delete old records ~p on ~p",[Reason,Index])
@@ -147,10 +155,10 @@ handle_command({clear_db,Bucket}, Sender,
 
 %%Receive command to store data in user format.
 handle_command(?ETSDB_STORE_REQ{bucket=Bucket,value=Value,req_id=ReqID}, Sender,
-               #state{backend=BackEndModule,backend_ref=BackEndRef,vnode_index=Index}=State)->
+               #state{backend=BackEndModule,backend_ref=BackEndRef,vnode_index=Index, aee_ref = AeeRef}=State)->
     case BackEndModule:save(Bucket,Value,BackEndRef) of
         {Result,NewBackEndRef}->
-
+            etsdb_aee:insert(AeeRef, Index, Bucket, Value),
             riak_core_vnode:reply(Sender, {w,Index,ReqID,Result});
         {error,Reason,NewBackEndRef}->
             riak_core_vnode:reply(Sender, {w,Index,ReqID,{error,Reason}})
@@ -277,9 +285,10 @@ handle_exit(_Pid,_Reason,State)->
 %% Terminate vnode process.
 %% Try terminate all child(user process) like supervisor
 %%------------------------------------------
-terminate(Reason,#state{backend=BackEndModule,backend_ref=BackEndRef}=State)->
+terminate(Reason,#state{backend=BackEndModule,backend_ref=BackEndRef, vnode_index = Index, aee_ref = AeeRef}=State)->
     lager:info("etsdb vnode terminated in state ~p reason ~p",[State,Reason]),
     BackEndModule:stop(BackEndRef),
+    etsdb_aee_sup:stop_aee(AeeRef),
     ok;
 terminate(Reason,State)->
     lager:info("etsdb vnode terminated in state ~p reason ~p",[State,Reason]),
