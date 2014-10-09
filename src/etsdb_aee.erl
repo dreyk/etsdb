@@ -84,7 +84,8 @@ expire(Index, Bucket, Keys) ->
     {ok, StateName :: atom(), StateData :: #state{}} |
     {ok, StateName :: atom(), StateData :: #state{}, timeout() | hibernate} |
     {stop, Reason :: term()} | ignore).
-init([]) ->
+init([Index, _Opts]) ->
+    gproc:add_local_name(Index),
     {ok, state_name, #state{}}.
 
 %%--------------------------------------------------------------------
