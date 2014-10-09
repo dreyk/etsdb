@@ -47,9 +47,14 @@ start_aee(Index) ->
 
 %% @doc
 %% Stops specified aee worker
--spec stop_aee(pid()) -> ok | {error, term()}.
-stop_aee(Pid) ->
-    supervisor:terminate_child(?SERVER, Pid).
+-spec stop_aee(index()) -> ok | {error, term()}.
+stop_aee(Index) ->
+    case catch etsdb_aee:lookup(Index) of
+        Pid when is_pid(Pid) ->
+            supervisor:terminate_child(?SERVER, Pid);
+        Else ->
+            {error, Else}
+    end.
 
 
 %%%===================================================================

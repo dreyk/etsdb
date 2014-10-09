@@ -12,7 +12,7 @@
 -behaviour(gen_fsm).
 
 %% API
--export([start_link/2, insert/4, expire/4]).
+-export([start_link/2, insert/3, expire/3, lookup/1]).
 
 %% gen_fsm callbacks
 -export([init/1,
@@ -55,14 +55,17 @@
 start_link(Opts, Index) ->
     gen_fsm:start_link(?MODULE, [Index, Opts], []).
 
+-spec lookup(index()) -> pid().
+lookup(Index) ->
+    gproc:lookup_local_name(Index).
 
--spec insert(pid(), index(), bucket(), kv_list()) -> ok.
-insert(Ref, _Index, Bucket, Value) ->
-    gen_fsm:send_event(Ref, #insert_event{bucket = Bucket, value = Value}).
+-spec insert(index(), bucket(), kv_list()) -> ok.
+insert(Index, Bucket, Value) ->
+    gen_fsm:send_event(lookup(Index), #insert_event{bucket = Bucket, value = Value}).
 
--spec expire(pid(), index(), bucket(), [binary()]) -> ok.
-expire(Ref, _Index, Bucket, Keys) ->
-    gen_fsm:send_event(Ref, #expire_event{bucket = Bucket, keys = Keys}).
+-spec expire(index(), bucket(), [binary()]) -> ok.
+expire(Index, Bucket, Keys) ->
+    gen_fsm:send_event(lookup(Index), #expire_event{bucket = Bucket, keys = Keys}).
 
 %%%===================================================================
 %%% gen_fsm callbacks

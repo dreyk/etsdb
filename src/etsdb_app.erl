@@ -79,4 +79,5 @@ start_test_inner() ->
     ok = application:start(webmachine),
     ok = application:start(riak_core),
     ok = application:start(riak_api),
+    ok = application:start(gproc),
     ok = application:start(etsdb).

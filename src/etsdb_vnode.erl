@@ -48,7 +48,7 @@
 -include_lib("riak_core/include/riak_core_vnode.hrl").
 
 %%vnode state
--record(state,{delete_mod,vnode_index,backend,backend_ref,aee_ref}).
+-record(state,{delete_mod,vnode_index,backend,backend_ref}).
 
 %%Start vnode
 start_vnode(I) ->
@@ -116,11 +116,11 @@ handle_command({remove_expired,Bucket,{expired_records,{0,_Records}}}, _Sender,
     riak_core_vnode:send_command_after(clear_period(Bucket),{clear_db,Bucket}),
     {noreply,State};
 handle_command({remove_expired,Bucket,{expired_records,{Count,Records}}}, _Sender,
-               #state{backend=BackEndModule,backend_ref=BackEndRef,vnode_index=Index, aee_ref = AeeRef}=State)->
+               #state{backend=BackEndModule,backend_ref=BackEndRef,vnode_index=Index}=State)->
     ToDelete = lists:usort(Records),
     case BackEndModule:delete(Bucket,ToDelete,BackEndRef) of
         {ok,NewBackEndRef}->
-            etsdb_aee:expire(AeeRef, Index, Bucket, ToDelete),
+            etsdb_aee:expire(Index, Bucket, ToDelete),
             ok;
         {error,Reason,NewBackEndRef}->
             lager:error("Can't delete old records ~p on ~p",[Reason,Index])
@@ -155,10 +155,10 @@ handle_command({clear_db,Bucket}, Sender,
 
 %%Receive command to store data in user format.
 handle_command(?ETSDB_STORE_REQ{bucket=Bucket,value=Value,req_id=ReqID}, Sender,
-               #state{backend=BackEndModule,backend_ref=BackEndRef,vnode_index=Index, aee_ref = AeeRef}=State)->
+               #state{backend=BackEndModule,backend_ref=BackEndRef,vnode_index=Index}=State)->
     case BackEndModule:save(Bucket,Value,BackEndRef) of
         {Result,NewBackEndRef}->
-            etsdb_aee:insert(AeeRef, Index, Bucket, Value),
+            etsdb_aee:insert(Index, Bucket, Value),
             riak_core_vnode:reply(Sender, {w,Index,ReqID,Result});
         {error,Reason,NewBackEndRef}->
             riak_core_vnode:reply(Sender, {w,Index,ReqID,{error,Reason}})
@@ -285,10 +285,10 @@ handle_exit(_Pid,_Reason,State)->
 %% Terminate vnode process.
 %% Try terminate all child(user process) like supervisor
 %%------------------------------------------
-terminate(Reason,#state{backend=BackEndModule,backend_ref=BackEndRef, vnode_index = Index, aee_ref = AeeRef}=State)->
+terminate(Reason,#state{backend=BackEndModule,backend_ref=BackEndRef, vnode_index = Index}=State)->
     lager:info("etsdb vnode terminated in state ~p reason ~p",[State,Reason]),
     BackEndModule:stop(BackEndRef),
-    etsdb_aee_sup:stop_aee(AeeRef),
+    etsdb_aee_sup:stop_aee(Index),
     ok;
 terminate(Reason,State)->
     lager:info("etsdb vnode terminated in state ~p reason ~p",[State,Reason]),
