@@ -12,45 +12,44 @@
 -behaviour(gen_fsm).
 
 %% API
--export([start_link/2, insert/3, expire/3, lookup/1]).
+-export([start_link/2, insert/3, expire/3, lookup/1, start_exchange/2, wait_cmd/3, get_segment_hashes/3]).
 
 %% gen_fsm callbacks
 -export([init/1,
-         state_name/2,
-         state_name/3,
          handle_event/3,
          handle_sync_event/4,
          handle_info/3,
          terminate/3,
          code_change/4]).
 
+%% worker interaction
+
+-export([finalize_rehash/3, rehash/1]).
+
+%% states
+-export([init_hashtree/2, rehash/2, wait_cmd/2]).
+
 -define(SERVER, ?MODULE).
 
 -type index() :: non_neg_integer().
 -type start_options() :: [start_option()].
--type time_interval() :: {non_neg_integer(),d} | {non_neg_integer(), w} | {non_neg_integer(), y}.
--type start_option() :: {granularity, time_interval()}|{expiration, time_interval()}|{path, string()}.
+-type time_interval() :: zont_pretty_time:time_interval().
+-type start_option() :: {granularity, time_interval()} | {reahsh_interval, time_interval()}|{path, string()}.
 -type bucket() :: module().
 -type kv_list() :: [kv()].
 -type kv():: {binary(), binary()}.
 
--record(state, {}).
+-record(state, {vnode_index::index(), opts, trees = [], rehash_timer_ref::ref()}).
 
 -record(insert_event, {bucket::bucket(), value::kv_list()}).
 -record(expire_event, {bucket::bucket(), keys::[binary()]}).
+-record(rehashdone_event, {result::atom(), trees = []}).
 
 %%%===================================================================
 %%% API
 %%%===================================================================
 
-%%--------------------------------------------------------------------
-%% @doc
-%% Creates a gen_fsm process which calls Module:init/1 to
-%% initialize. To ensure a synchronized start-up procedure, this
-%% function does not return until Module:init/1 has returned.
-%%
-%% @end
-%%--------------------------------------------------------------------
+%% control
 -spec(start_link(start_options(), index()) -> {ok, pid()} | ignore | {error, Reason :: term()}).
 start_link(Opts, Index) ->
     gen_fsm:start_link(?MODULE, [Index, Opts], []).
@@ -66,6 +65,23 @@ insert(Index, Bucket, Value) ->
 -spec expire(index(), bucket(), [binary()]) -> ok.
 expire(Index, Bucket, Keys) ->
     gen_fsm:send_event(lookup(Index), #expire_event{bucket = Bucket, keys = Keys}).
+
+
+%% exchange
+start_exchange(Index, Remote) ->
+    gen_fsm:send_event(lookup(Index), {start_exchange_event, Remote}).
+
+get_segment_hashes(Index, Tree, Segment) ->
+    gen_fsm:sync_send_event(lookup(Index), {get_hashes_event, Tree, Segment}).
+
+%% internal: aee worker interaction
+-spec finalize_rehash(pid(), atom(), [term()]) -> ok.
+finalize_rehash(Pid, Result, Trees) ->
+    gen_fsm:send_event(Pid, #rehashdone_event{result = Result, trees = Trees}).
+
+-spec rehash(pid()) -> ok.
+rehash(Pid) ->
+    gen_fsm:send_event(Pid, rehash).
 
 %%%===================================================================
 %%% gen_fsm callbacks
@@ -84,64 +100,42 @@ expire(Index, Bucket, Keys) ->
     {ok, StateName :: atom(), StateData :: #state{}} |
     {ok, StateName :: atom(), StateData :: #state{}, timeout() | hibernate} |
     {stop, Reason :: term()} | ignore).
-init([Index, _Opts]) ->
+init([Index, Opts]) ->
     gproc:add_local_name(Index),
-    {ok, state_name, #state{}}.
+    RehashTimeout = zont_data_util:propfind(reahsh_interval, Opts, {1, w}),
+    timer:apply_interval(zont_pretty_time:to_millisec(RehashTimeout), ?MODULE, rehash, [self()]),
+    {ok, init_hashtree, #state{vnode_index = Index, opts = Opts}, 0}.
 
-%%--------------------------------------------------------------------
-%% @private
-%% @doc
-%% There should be one instance of this function for each possible
-%% state name. Whenever a gen_fsm receives an event sent using
-%% gen_fsm:send_event/2, the instance of this function with the same
-%% name as the current state name StateName is called to handle
-%% the event. It is also called if a timeout occurs.
-%%
-%% @end
-%%--------------------------------------------------------------------
--spec(state_name(Event, State) ->
-    {next_state, NextStateName :: atom(), NextState :: #state{}} |
-    {next_state, NextStateName :: atom(), NextState :: #state{},
-     timeout() | hibernate} |
-    {stop, Reason :: term(), NewState :: #state{}}).
-state_name(_Event, State) ->
-    {next_state, state_name, State}.
 
-%%--------------------------------------------------------------------
-%% @private
-%% @doc
-%% There should be one instance of this function for each possible
-%% state name. Whenever a gen_fsm receives an event sent using
-%% gen_fsm:sync_send_event/[2,3], the instance of this function with
-%% the same name as the current state name StateName is called to
-%% handle the event.
-%%
-%% @end
-%%--------------------------------------------------------------------
--spec(state_name(Event :: term(), From :: {pid(), term()},
-                 State :: #state{}) ->
-                    {next_state, NextStateName :: atom(), NextState :: #state{}} |
-                    {next_state, NextStateName :: atom(), NextState :: #state{},
-                     timeout() | hibernate} |
-                    {reply, Reply, NextStateName :: atom(), NextState :: #state{}} |
-                    {reply, Reply, NextStateName :: atom(), NextState :: #state{},
-                     timeout() | hibernate} |
-                    {stop, Reason :: normal | term(), NewState :: #state{}} |
-                    {stop, Reason :: normal | term(), Reply :: term(),
-                     NewState :: #state{}}).
-state_name(_Event, _From, State) ->
-    Reply = ok,
-    {reply, Reply, state_name, State}.
+init_hashtree(timeout, State = #state{opts = Opts}) ->
+    State2 = State#state{trees = etsdb_aee_hashtree:load_trees(Opts)},
+    {next_state, rehash, State2, 0}.
 
-%%--------------------------------------------------------------------
-%% @private
-%% @doc
-%% Whenever a gen_fsm receives an event sent using
-%% gen_fsm:send_all_state_event/2, this function is called to handle
-%% the event.
-%%
-%% @end
-%%--------------------------------------------------------------------
+rehash(timeout, State = #state{trees = Trees}) ->
+    etsdb_aee_hashtree:rehash(self(), Trees),
+    {next_state, wait_cmd, State}.
+
+wait_cmd(#insert_event{bucket = Bucket, value = Data}, State = #state{trees = Trees}) ->
+    State2 = State#state{trees = etsdb_aee_hashtree:insert(Bucket, Data, Trees)},
+    {next_state, wait_cmd, State2};
+
+wait_cmd(#expire_event{bucket = Bucket, keys = Keys}, State = #state{trees = Trees}) ->
+    State2 = State#state{trees = etsdb_aee_hashtree:expire(Bucket, Keys, Trees)},
+    {next_state, wait_cmd, State2};
+
+wait_cmd(#rehashdone_event{result = ok, trees = RehashedTrees}, State = #state{trees = RecentTrees}) ->
+    State2 = State#state{trees = etsdb_aee_hashtree:merge_trees(RehashedTrees, RecentTrees)},
+    {next_state, wait_cmd, State2};
+
+wait_cmd({start_exchange_event, Remote}, State = #state{trees = Trees}) ->
+    etsdb_aee_hashtree:start_exchange(Remote, Trees),
+    {next_state, wait_cmd, State}.
+
+wait_cmd({get_hashes_event, Tree, Segment}, _From, State = #state{trees = Trees}) ->
+    R = etsdb_aee_hashtree:get_hashes(Segment, Tree, Trees),
+    {reply, R, wait_cmd, State}.
+
+
 -spec(handle_event(Event :: term(), StateName :: atom(),
                    StateData :: #state{}) ->
                       {next_state, NextStateName :: atom(), NewStateData :: #state{}} |
@@ -151,15 +145,7 @@ state_name(_Event, _From, State) ->
 handle_event(_Event, StateName, State) ->
     {next_state, StateName, State}.
 
-%%--------------------------------------------------------------------
-%% @private
-%% @doc
-%% Whenever a gen_fsm receives an event sent using
-%% gen_fsm:sync_send_all_state_event/[2,3], this function is called
-%% to handle the event.
-%%
-%% @end
-%%--------------------------------------------------------------------
+
 -spec(handle_sync_event(Event :: term(), From :: {pid(), Tag :: term()},
                         StateName :: atom(), StateData :: term()) ->
                            {reply, Reply :: term(), NextStateName :: atom(), NewStateData :: term()} |
@@ -174,15 +160,7 @@ handle_sync_event(_Event, _From, StateName, State) ->
     Reply = ok,
     {reply, Reply, StateName, State}.
 
-%%--------------------------------------------------------------------
-%% @private
-%% @doc
-%% This function is called by a gen_fsm when it receives any
-%% message other than a synchronous or asynchronous event
-%% (or a system message).
-%%
-%% @end
-%%--------------------------------------------------------------------
+
 -spec(handle_info(Info :: term(), StateName :: atom(),
                   StateData :: term()) ->
                      {next_state, NextStateName :: atom(), NewStateData :: term()} |
@@ -192,28 +170,13 @@ handle_sync_event(_Event, _From, StateName, State) ->
 handle_info(_Info, StateName, State) ->
     {next_state, StateName, State}.
 
-%%--------------------------------------------------------------------
-%% @private
-%% @doc
-%% This function is called by a gen_fsm when it is about to
-%% terminate. It should be the opposite of Module:init/1 and do any
-%% necessary cleaning up. When it returns, the gen_fsm terminates with
-%% Reason. The return value is ignored.
-%%
-%% @end
-%%--------------------------------------------------------------------
+
 -spec(terminate(Reason :: normal | shutdown | {shutdown, term()}
 | term(),       StateName :: atom(), StateData :: term()) -> term()).
 terminate(_Reason, _StateName, _State) ->
     ok.
 
-%%--------------------------------------------------------------------
-%% @private
-%% @doc
-%% Convert process state when code is changed
-%%
-%% @end
-%%--------------------------------------------------------------------
+
 -spec(code_change(OldVsn :: term() | {down, term()}, StateName :: atom(),
                   StateData :: #state{}, Extra :: term()) ->
                      {ok, NextStateName :: atom(), NewStateData :: #state{}}).
