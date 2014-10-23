@@ -40,12 +40,22 @@
          put_external/4,
          put_external/5,
          get_query/4,
-         scan/3]).
+         scan/3, get_exchange_remote/2, exchange_partition/3]).
 
 -behaviour(riak_core_vnode).
 
 -include("etsdb_request.hrl").
 -include_lib("riak_core/include/riak_core_vnode.hrl").
+
+-type partition() :: {non_neg_integer(), node()}.
+-type remote_fun() :: term().
+
+-record(etsdb_exchange_remote_req, {partition::partition()}).
+-define(EXCHANGE_REMOTE_REQ, #etsdb_exchange_remote_req).
+
+-record(etsdb_exchange_req, {partition::partition(), remote_fun::remote_fun()}).
+-define(EXCHANGE_REQ, #etsdb_exchange_req).
+
 
 %%vnode state
 -record(state,{delete_mod,vnode_index,backend,backend_ref}).
@@ -54,6 +64,9 @@
 start_vnode(I) ->
     riak_core_vnode_master:get_vnode_pid(I, etsdb_vnode).
 
+%% ---------------------------------------------------------------------------------------------------------------------
+%% API functions
+%% ---------------------------------------------------------------------------------------------------------------------
 
 put_internal(ReqID,Preflist,Data)->
     riak_core_vnode_master:command(Preflist,#etsdb_innerstore_req_v1{value=Data,req_id=ReqID},{fsm,undefined,self()},etsdb_vnode_master).
@@ -67,6 +80,19 @@ scan(ReqID,Vnode,Scans)->
     riak_core_vnode_master:command([{Vnode,node()}],#etsdb_get_query_req_v1{get_query=Scans,req_id=ReqID,bucket=custom_scan},{fsm,undefined,self()},etsdb_vnode_master).
 get_query(ReqID,Preflist,Bucket,Query)->
     riak_core_vnode_master:command(Preflist,#etsdb_get_query_req_v1{get_query=Query,req_id=ReqID,bucket=Bucket},{fsm,undefined,self()},etsdb_vnode_master).
+
+-spec get_exchange_remote(partition(), partition()) -> remote_fun().
+get_exchange_remote(MasterPartition, Partition)->
+    riak_core_vnode_master:command([Partition], ?EXCHANGE_REMOTE_REQ{partition = MasterPartition}, {fsm,undefined,self()},etsdb_vnode_master).
+
+-spec exchange_partition(partition(), partition(), remote_fun()) -> any().
+exchange_partition(MasterPartition, Partition, Remote) ->
+    ExchFun = riak_core_vnode_master:command([Partition], ?EXCHANGE_REQ{partition = MasterPartition, remote_fun = Remote},{fsm,undefined,self()},etsdb_vnode_master),
+    ExchFun().
+
+%% ---------------------------------------------------------------------------------------------------------------------
+%% Internal functions
+%% ---------------------------------------------------------------------------------------------------------------------
 
 %%Init Callback.
 init([Index]) ->
@@ -85,7 +111,7 @@ init([Index]) ->
         {ok,Ref}->
             RBuckets = app_helper:get_env(etsdb,registered_bucket),
             start_clear_buckets(RBuckets),
-            {ok,#state{vnode_index=Index,delete_mod=DeleteMode,backend=BackEndModule,backend_ref=Ref, aee_ref = AeeRef},[{pool,etsdb_vnode_worker, 10, []}]};
+            {ok,#state{vnode_index=Index,delete_mod=DeleteMode,backend=BackEndModule,backend_ref=Ref},[{pool,etsdb_vnode_worker, 10, []}]};
         {error,Else}->
             {error,Else}
     end.
@@ -221,7 +247,13 @@ handle_command(?FOLD_REQ{foldfun=FoldFun, acc0=Acc0}, Sender,
         Else->
             riak_core_vnode:reply(Sender,{error,Else}),
             {noreply, State}
-    end.
+    end;
+handle_command(?EXCHANGE_REMOTE_REQ{partition = Partition}, _Sender, State = #state{vnode_index = Index}) ->
+    Remote = etsdb_aee:get_exchange_remote(Index, Partition),
+    {reply, Remote, State};
+handle_command(?EXCHANGE_REQ{partition = Partition, remote_fun = Remote}, _Sender, State = #state{vnode_index = Index}) ->
+    ExchanheFun = etsdb_aee:get_exchange_fun(Index, Partition, Remote),
+    {reply, ExchanheFun, State}.
     
 
 handle_info(timeout,State)->

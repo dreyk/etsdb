@@ -62,9 +62,23 @@ exchange(timeout, #state{exchange_interval = ExchageInterval} = State) ->
     State2 = do_exchange(State),
     {next_state, exchange, State2, ExchageInterval}.
 
-do_exchange(_State) ->
-    {ok, _Ring} = riak_core_ring_manager:get_my_ring(),
-    error('not implemented').
+do_exchange(State) ->
+    {ok, Ring} = riak_core_ring_manager:get_my_ring(),
+    AllPrefs = riak_core_ring:all_preflists(Ring, 3), %%TODO determine actual preflist size
+    lists:foreach(fun exchange_one/1, AllPrefs),
+    State.
+
+exchange_one([SrcPartition|DstPartitions]) ->
+    Remote = etsdb_vnode:get_exchange_remote(SrcPartition, SrcPartition),
+    try
+        lists:foreach(fun(DstPartition) -> etsdb_vnode:exchange_partition(SrcPartition, DstPartition, Remote) end, DstPartitions),
+        exchange_one(DstPartitions)
+    after
+        Remote(release)
+    end;
+exchange_one(_) ->
+    ok.
+
 
 
 -spec(handle_event(Event :: term(), StateName :: atom(),
