@@ -12,7 +12,7 @@
 -behaviour(gen_fsm).
 
 %% API
--export([start_link/2, insert/3, expire/3, lookup/1, start_exchange/2, wait_cmd/3, get_segment_hashes/3]).
+-export([start_link/2, insert/3, expire/3, lookup/1, get_exchange_remote/2, get_exchange_fun/3]).
 
 %% gen_fsm callbacks
 -export([init/1,
@@ -27,23 +27,32 @@
 -export([finalize_rehash/3, rehash/1]).
 
 %% states
--export([init_hashtree/2, rehash/2, wait_cmd/2]).
+-export([
+    init_hashtree/2,
+    rehash/2,
+    wait_cmd/2, wait_cmd/3,
+    exchanging/2,
+    rehashing/2, rehashing/3]).
 
 -define(SERVER, ?MODULE).
 
--type index() :: non_neg_integer().
+-type index() :: vnode:index().
+-type partition() :: {index(), node()}.
 -type start_options() :: [start_option()].
 -type time_interval() :: zont_pretty_time:time_interval().
 -type start_option() :: {granularity, time_interval()} | {reahsh_interval, time_interval()}|{path, string()}.
 -type bucket() :: module().
 -type kv_list() :: [kv()].
 -type kv():: {binary(), binary()}.
+-type remote_fun() :: term().
 
--record(state, {vnode_index::index(), opts, trees = [], rehash_timer_ref::ref()}).
+-record(state, {vnode_index::index(), opts, trees = [], rehash_timer_ref::ref(), current_xchg_partition::partition(), postpone=[]}).
 
 -record(insert_event, {bucket::bucket(), value::kv_list()}).
 -record(expire_event, {bucket::bucket(), keys::[binary()]}).
 -record(rehashdone_event, {result::atom(), trees = []}).
+-record(start_exchange_remote_event, {partition::index()}).
+-record(start_exchnage_event, {partition::index(), remote_fun::remote_fun()}).
 
 %%%===================================================================
 %%% API
@@ -68,11 +77,12 @@ expire(Index, Bucket, Keys) ->
 
 
 %% exchange
-start_exchange(Index, Remote) ->
-    gen_fsm:send_event(lookup(Index), {start_exchange_event, Remote}).
+get_exchange_fun(Index, Partition, Remote) ->
+    gen_fsm:sync_send_event(lookup(Index), #start_exchnage_event{partition = Partition, remote_fun = Remote}).
 
-get_segment_hashes(Index, Tree, Segment) ->
-    gen_fsm:sync_send_event(lookup(Index), {get_hashes_event, Tree, Segment}).
+-spec get_exchange_remote(partition(), partition()) -> remote_fun().
+get_exchange_remote({Index, _node}, {Partition, _master_node}) ->
+    gen_fsm:sync_send_event(lookup(Index), #start_exchange_remote_event{partition = Partition}).
 
 %% internal: aee worker interaction
 -spec finalize_rehash(pid(), atom(), [term()]) -> ok.
@@ -113,7 +123,7 @@ init_hashtree(timeout, State = #state{opts = Opts}) ->
 
 rehash(timeout, State = #state{trees = Trees}) ->
     etsdb_aee_hashtree:rehash(self(), Trees),
-    {next_state, wait_cmd, State}.
+    {next_state, rehashing, State}.
 
 wait_cmd(#insert_event{bucket = Bucket, value = Data}, State = #state{trees = Trees}) ->
     State2 = State#state{trees = etsdb_aee_hashtree:insert(Bucket, Data, Trees)},
@@ -121,19 +131,61 @@ wait_cmd(#insert_event{bucket = Bucket, value = Data}, State = #state{trees = Tr
 
 wait_cmd(#expire_event{bucket = Bucket, keys = Keys}, State = #state{trees = Trees}) ->
     State2 = State#state{trees = etsdb_aee_hashtree:expire(Bucket, Keys, Trees)},
-    {next_state, wait_cmd, State2};
+    {next_state, wait_cmd, State2}.
 
-wait_cmd(#rehashdone_event{result = ok, trees = RehashedTrees}, State = #state{trees = RecentTrees}) ->
-    State2 = State#state{trees = etsdb_aee_hashtree:merge_trees(RehashedTrees, RecentTrees)},
-    {next_state, wait_cmd, State2};
+wait_cmd(#start_exchange_remote_event{partition = Partition}, _From, State = #state{trees = Trees}) ->
+    Pid = self(),
+    Remote = fun
+        (release) ->
+            gen_fsm:send_event(Pid, exchange_finished);
+        (_) ->
+            error('not implemented')
+        end,
+    {reply, Remote, exchanging, State};
+wait_cmd(#start_exchnage_event{partition = Partition, remote_fun = Remote}, _From, State) ->
+    Pid = self(),
+    ExchangeFun = fun() ->
+        etsdb_aee_hashtree:exchange(Remote),
+        gen_fsm:send_event(Pid, exchange_finished)
+    end,
+    {reply, ExchangeFun, exchanging, State}.
 
-wait_cmd({start_exchange_event, Remote}, State = #state{trees = Trees}) ->
-    etsdb_aee_hashtree:start_exchange(Remote, Trees),
-    {next_state, wait_cmd, State}.
+exchanging(#insert_event{bucket = Bucket, value = Data}, State = #state{trees = Trees}) ->
+    State2 = State#state{trees = etsdb_aee_hashtree:insert(Bucket, Data, Trees)},
+    {next_state, exchanging, State2};
 
-wait_cmd({get_hashes_event, Tree, Segment}, _From, State = #state{trees = Trees}) ->
-    R = etsdb_aee_hashtree:get_hashes(Segment, Tree, Trees),
-    {reply, R, wait_cmd, State}.
+exchanging(rehash, State = #state{postpone = Postpone}) ->
+    {next_state, exchanging, State#state{postpone=[rehash|Postpone]}};
+
+exchanging(#expire_event{} = Expire, State = #state{postpone = Postpone}) ->
+    {next_state, exchanging, State#state{postpone=[Expire|Postpone]}};
+
+exchanging(exchange_finished, State = #state{postpone = Reprocess}) ->
+    ToProcess = lists:reverse(lists:usort([rehash|Reprocess])),
+    Pid = self(),
+    lists:foreach(fun(Event) -> gen_fsm:send_event(Pid, Event) end, ToProcess),
+    {next_state, wait_cmd, State#state{postpone = []}}.
+
+
+rehashing(#insert_event{bucket = Bucket, value = Data}, State = #state{trees = Trees}) ->
+    State2 = State#state{trees = etsdb_aee_hashtree:insert(Bucket, Data, Trees)},
+    {next_state, rehashing, State2};
+
+rehashing(#expire_event{} = Expire, State = #state{postpone = Postpone}) ->
+    State2 = State#state{postpone = [Expire]},
+    {next_state, rehashing, State2};
+
+rehashing(#rehashdone_event{result = ok, trees = RehashedTrees}, State = #state{trees = RecentTrees, postpone = Reprocess}) ->
+    ToProcess = lists:reverse(lists:usort(Reprocess)),
+    Pid = self(),
+    lists:foreach(fun(Event) -> gen_fsm:send_event(Pid, Event) end, ToProcess),
+    State2 = State#state{trees = etsdb_aee_hashtree:merge_trees(RehashedTrees, RecentTrees), postpone = []},
+    {next_state, wait_cmd, State2}.
+
+rehashing(#start_exchnage_event{}, _From, State) ->
+    {reply, busy, rehashing, State};
+rehashing(#start_exchange_remote_event{}, _From, State) ->
+    {reply, busy, rehashing, State}.
 
 
 -spec(handle_event(Event :: term(), StateName :: atom(),
