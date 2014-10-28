@@ -100,13 +100,13 @@ init([Index]) ->
     %%{BackEndModule,BackEndProps} = app_helper:get_env(etsdb, backend,{etsdb_ets_backend,[]}),
     {BackEndModule,BackEndProps} = app_helper:get_env(etsdb, backend,{etsdb_leveldb_backend,[{data_root,"./data/leveldb"}]}),
     %%Start storage backend,
-    AeeRef = case etsdb_aee_sup:start_aee(Index) of
-                 {ok, ARef} ->
-                     ARef;
-                 {error, Reason} ->
-                     error(Reason),
-                     undefined
-             end,
+    case etsdb_aee_sup:start_aee(Index) of
+        {ok, ARef} ->
+            ARef;
+        {error, Reason} ->
+            error(Reason),
+            undefined
+    end,
     case BackEndModule:init(Index,BackEndProps) of
         {ok,Ref}->
             RBuckets = app_helper:get_env(etsdb,registered_bucket),
