@@ -20,7 +20,7 @@
 -type tree_group() :: term().
 -type tree_update() :: {replace, index(), tree_group()}.
 -type update_fun() :: fun( (tree_update())->any() ).
--type date_intervals() :: term().
+-type date_intervals() :: etsdb_aee_intervals:time_intervals().
 
 -record(state, {trees::tree_group(), date_intervals::date_intervals(), root_path::string()}).
 
