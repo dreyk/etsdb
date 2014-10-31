@@ -22,19 +22,13 @@
 -module(etsdb_bucket).
 -author('Alex G. <gunin@mail.mipt.ru>').
 
+-type key() :: binary().
+-type timestamp() :: non_neg_integer(). %% timestamp in millisec
 
--export([behaviour_info/1]).
-
-
--spec behaviour_info(atom()) -> 'undefined' | [{atom(), arity()}].
-behaviour_info(callbacks) ->
-    [
-     {api_version,0},
-     {w_val,0},
-     {r_val,0},
-     {w_quorum,0},
-     {r_quorum,0},
-     {make_partitions,1}
-    ];
-behaviour_info(_Other) ->
-    undefined.
+-callback api_version() -> any().
+-callback w_wal() -> pos_integer().
+-callback r_wal() -> pos_integer().
+-callback w_quorum() -> pos_integer().
+-callback r_quorum() -> pos_integer().
+-callback make_partitions(any()) -> any(). %% TODO @Dreyk provide actual type spec.
+-callback timestamp_for_keys([key()]) -> [{key(), timestamp()}].
