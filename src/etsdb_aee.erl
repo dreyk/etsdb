@@ -70,14 +70,8 @@ lookup(Index) ->
 
 -spec insert(index(), bucket(), kv_list()) -> ok.
 insert(Index, Bucket, Value) ->
-    HashedObjects = lists:keymap(fun(Obj) -> hash_object(Bucket, Obj) end, 2, Value),
+    HashedObjects = lists:keymap(fun(Obj) -> etsdb_aee_hashtree:hash_object(Bucket, Obj) end, 2, Value),
     gen_fsm:send_event(lookup(Index), #insert_event{bucket = Bucket, value = HashedObjects}).
-
--spec hash_object(bucket(), term()) -> binary().
-hash_object(_bucket, Obj) when is_binary(Obj) ->
-    crypto:md5(Obj);
-hash_object(Bucket, Obj) ->
-    Bucket:hash_bject(Obj).
 
 -spec expire(index(), bucket(), [binary()]) -> ok.
 expire(Index, Bucket, Keys) ->

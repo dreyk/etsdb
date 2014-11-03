@@ -9,8 +9,10 @@
 -module(etsdb_aee_hashtree).
 -author("sidorov").
 
+-include("etsdb_request.hrl").
+
 %% API
--export([load_trees/2, insert/3, expire/3, get_xchg_remote/3, exchange/4, merge_trees/2, rehash/2]).
+-export([load_trees/2, insert/3, expire/3, get_xchg_remote/3, exchange/4, merge_trees/2, rehash/2, hash_object/2]).
 
 -type start_options() :: etsdb_aee:start_options().
 -type index() :: etsdb_aee:index().
@@ -22,7 +24,7 @@
 -type update_fun() :: fun( (tree_update())->any() ).
 -type date_intervals() :: etsdb_aee_intervals:time_intervals().
 
--record(state, {trees::tree_group(), date_intervals::date_intervals(), root_path::string()}).
+-record(state, {trees::tree_group(), date_intervals::date_intervals(), root_path::string(), vnode_index::index(), buckets::[bucket()]}).
 
 %% =====================================================================================================================
 %% PUBLIC API FUNCTIONS
@@ -44,7 +46,7 @@ load_trees(Index, Opts) ->
                 end, dict:new(), Params),
             dict:append(Indx, FinalIndxDict, Dict)
         end, dict:new(), Indices),
-    #state{trees = Trees, date_intervals = DateInterval, root_path = RootPath}.
+    #state{trees = Trees, date_intervals = DateInterval, root_path = RootPath, vnode_index = Index}.
 
 -spec insert(bucket(), kv_list(), #state{}) -> #state{}.
 insert(_Bucket, [], Trees) ->
@@ -195,12 +197,58 @@ remove_objects(_Bucket, Keys, Tree) ->
             etsdb_hashtree:delete(K, WorkTree)
         end, Tree, Keys).
 
+
+-record(rehash_state, {tree}).
+
 -spec rehash_indx(tree_group(), index(), #state{}) -> tree_group().
-rehash_indx(TreeGroup, Index, #state{}) ->
-    dict:map(
-        fun(_Interval, Tree) ->
-            ReqId = make_ref(),
-            Scan = [],
-            etsdb_vnode:scan(ReqId, Index, Scan)
+rehash_indx(TreeGroup, Partition, #state{vnode_index = NodeIndex, buckets = Buckets}) ->
+    ScanReqs = dict:map(
+        fun(Interval, Tree) ->
+            Ref = make_ref(),
+            generate_rehash_scan_req(Partition, Interval, Tree, Buckets),
+            etsdb_vnode:scan(Ref, NodeIndex, ScanReqs),
+            TimeOut = zont_pretty_time:to_millisec({1, h}), %% TODO determine rehash timeout
+            receive
+                {r, _Index,Ref, {ok, #rehash_state{tree = NewTree}}} ->
+                    NewTree
+                after TimeOut ->
+                    lager:error("Rehash timeout or failed. Partition ~p on vnode ~p. Interval ~p", [Partition, NodeIndex, Interval]),
+                    Tree
+            end
         end, TreeGroup).
+
+-spec generate_rehash_scan_req(index(), etsdb_aee_intervals:time_inerval(), term(), [bucket()]) -> term().
+generate_rehash_scan_req(Index, Interval, InitialTree, Buckets) ->
+    #pscan_req{
+        partition = Index,
+        n_val = 1,
+        quorum = 1,
+        function = fun(_Backend) ->
+            KeyRanges = etsdb_aee_intervals:get_key_ranges_for_interval(Interval, Buckets),
+            {StartIterate, _} = hd(KeyRanges),
+            FoldFun = fun({K, V}, Acc) ->
+                WorkTree = case Acc of
+                               #rehash_state{tree = T} ->
+                                   T;
+                               [] ->
+                                   InitialTree
+                           end,
+                #rehash_state{tree = do_rehash_insert(K, V, WorkTree)}
+            end,
+            BatchSize = 1000, %% TODO determine batch size
+            {StartIterate, FoldFun, BatchSize, KeyRanges}
+        end,
+        catch_end_of_data = false
+    }.
+
+-spec do_rehash_insert(binary(), binary(), term()) -> term().
+do_rehash_insert(K, V, Tree)->
+    etsdb_hashtree:insert(K, hash_object(undefined, V), Tree).
+
+-spec hash_object(bucket(), term()) -> binary().
+hash_object(_bucket, Obj) when is_binary(Obj) ->
+    crypto:md5(Obj);
+hash_object(Bucket, Obj) ->
+    Bucket:hash_bject(Obj).
+
 
