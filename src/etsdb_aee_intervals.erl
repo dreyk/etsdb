@@ -12,11 +12,12 @@
 %% API
 
 -type start_options() :: etsdb_aee:start_options().
--type time_inerval() :: {non_neg_integer(), non_neg_integer()}.
--type time_intervals() :: [time_inerval()].
+-type time_interval() :: {non_neg_integer(), non_neg_integer()}.
+-type time_intervals() :: [time_interval()].
 -type bucket() :: etsdb_aee:bucket().
 
--export([generate_date_intervals/1, date_interval_to_string/1, should_exchange_interval/1, get_current_interval/1, get_keys_intervals/3]).
+-export([generate_date_intervals/1, date_interval_to_string/1, should_exchange_interval/1, get_current_interval/1,
+    get_keys_intervals/3, get_key_ranges_for_interval/2]).
 
 -spec generate_date_intervals(start_options()) -> time_intervals().
 generate_date_intervals(Opts) ->
@@ -31,18 +32,18 @@ generate_date_intervals(Opts) ->
 date_interval_to_string({Start, End}) ->
     io_lib:format("~20..0B_~20..0B", [Start, End]).
 
--spec should_exchange_interval(time_inerval()) -> boolean().
+-spec should_exchange_interval(time_interval()) -> boolean().
 should_exchange_interval({_Start, End}) ->
     Now = zont_time_util:system_time(sec),
     End < Now. %% not exchangin CURRENT interval , i.e. not yet finished.
 
 
--spec get_current_interval(time_intervals()) -> time_inerval().
+-spec get_current_interval(time_intervals()) -> time_interval().
 get_current_interval(Intervals) ->
     hd(Intervals). %% first interval is current according to the structure of the  INTERVALS date type.
 
 
--spec get_keys_intervals(bucket(), [binary()], time_intervals()) -> [{time_inerval(), [binary()]}].
+-spec get_keys_intervals(bucket(), [binary()], time_intervals()) -> [{time_interval(), [binary()]}].
 get_keys_intervals(Bucket, Keys, DateIntervals) ->
     KeysDates = Bucket:timestamp_for_keys(Keys),
     EmptyDict = dict:from_list([{Interval, []}||Interval<- DateIntervals]),
@@ -50,6 +51,16 @@ get_keys_intervals(Bucket, Keys, DateIntervals) ->
         fun({K, TSMSec}, WorkDict) ->
             TS = TSMSec / 1000,
             KInterval = hd(lists:dropwhile(fun({Start, _End}) -> TS < Start end, DateIntervals)),
-            dict:update(fun (Keys) -> [K | Keys] end, KInterval, WorkDict)
+            dict:update(fun (IKeys) -> [K | IKeys] end, KInterval, WorkDict)
         end, EmptyDict, KeysDates),
     dict:to_list(IntervalKeys).
+
+-spec get_key_ranges_for_interval(time_interval(), [bucket()]) -> [{binary(), binary()}].
+get_key_ranges_for_interval({Start, End}, Buckets) ->
+    lists:sort(lists:flatmap(
+        fun(Bucket) ->
+            [StartKey, EndKey] = Bucket:key_ranges_for_interval([Start, End]),
+            {StartKey, EndKey}
+        end, Buckets)).
+
+

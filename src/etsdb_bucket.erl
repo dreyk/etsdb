@@ -26,9 +26,10 @@
 -type timestamp() :: non_neg_integer(). %% timestamp in millisec
 
 -callback api_version() -> any().
--callback w_wal() -> pos_integer().
--callback r_wal() -> pos_integer().
+-callback w_val() -> pos_integer().
+-callback r_val() -> pos_integer().
 -callback w_quorum() -> pos_integer().
 -callback r_quorum() -> pos_integer().
 -callback make_partitions(any()) -> any(). %% TODO @Dreyk provide actual type spec.
 -callback timestamp_for_keys([key()]) -> [{key(), timestamp()}].
+-callback key_ranges_for_interval({timestamp(), timestamp()}) -> [{key(), key()}].
