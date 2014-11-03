@@ -45,7 +45,7 @@
 -type kv():: {binary(), binary()}.
 -type remote_fun() :: term().
 
--record(state, {vnode_index::index(), opts, trees, rehash_timer_ref::ref(), current_xchg_partition::partition(), postpone=[]}).
+-record(state, {vnode_index::index(), opts, trees, rehash_timer_ref::reference(), current_xchg_partition::partition(), postpone=[]}).
 
 -record(insert_event, {bucket::bucket(), value::kv_list()}).
 -record(expire_event, {bucket::bucket(), keys::[binary()]}).
