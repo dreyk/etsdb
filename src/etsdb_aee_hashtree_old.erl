@@ -296,17 +296,6 @@ handle_cast(build_finished, State) ->
     State2 = do_build_finished(State),
     {noreply, State2};
 
-handle_cast({start_exchange_remote, FsmPid, From, _IndexN}, State) ->
-    %% Concurrency lock already acquired, try to acquire tree lock.
-    case do_get_lock(remote_fsm, FsmPid, State) of
-        {ok, State2} ->
-            gen_server:reply(From, {remote_exchange, self()}),
-            {noreply, State2};
-        {Reply, State2} ->
-            gen_server:reply(From, {remote_exchange, Reply}),
-            {noreply, State2}
-    end;
-
 handle_cast(_Msg, State) ->
     {noreply, State}.
 
@@ -368,7 +357,7 @@ hash_object({Key, Value}) ->
 %% key/hash pair will be ignored.
 %% If `HasIndexTree` is true, also update the index spec tree.
 -spec fold_keys(index(), pid()) -> ok.
-fold_keys(Partition, Tree) ->
+fold_keys(_Partition, Tree) ->
     FoldFun = fold_fun(Tree),
     Req = riak_core_util:make_fold_req(FoldFun,
                                        0, false,
@@ -403,13 +392,9 @@ fold_fun(Tree) ->
         Acc2
     end.
 
--spec object_fold_fun(pid()) -> fun().
-object_fold_fun(Tree) ->
-    fun(Key, Data) ->
-        IndexN = ???,
-        insert([???],
-               [if_missing],
-               Tree)
+object_fold_fun(_Tree) ->
+    fun(_Key, _Data) ->
+      ok
     end.
 
 %% Generate a new {@link //riak_core/hashtree} for the specified `index_n'. If this is
@@ -520,15 +505,15 @@ expand_items(Items) ->
                          state()) -> state().
 do_insert_expanded([], _Opts, State) ->
     State;
-do_insert_expanded([{VnodeHash, {Key, Hash}}|Rest], Opts, State=#state{trees=Trees}) ->
+do_insert_expanded([{_VnodeHash, {Key, Hash}}|Rest], Opts, State=#state{trees=Trees}) ->
     State2 =
-    case orddict:find(Id, Trees) of
+    case orddict:find(id, Trees) of
         {ok, Tree} ->
             Tree2 = hashtree:insert(Key, Hash, Tree, Opts),
-            Trees2 = orddict:store(Id, Tree2, Trees),
+            Trees2 = orddict:store(id, Tree2, Trees),
             State#state{trees=Trees2};
         _ ->
-            handle_unexpected_key(Id, Key, State)
+            handle_unexpected_key(id, Key, State)
     end,
     do_insert_expanded(Rest, Opts, State2).
 
@@ -667,12 +652,12 @@ maybe_build(State) ->
 %% a fold/build. Otherwise, trigger a rehash to ensure the hashtrees match the
 %% current on-disk segments.
 -spec build_or_rehash(pid(), state()) -> ok.
-build_or_rehash(Self, State=#state{index=Index}) ->
+build_or_rehash(Self, State=#state{index=_Index}) ->
     Type = case load_built(State) of
                false -> build;
                true  -> rehash
            end,
-    Locked = get_all_locks(Type, Index, self()),
+    Locked = ok,
     build_or_rehash(Self, Locked, Type, State).
 
 build_or_rehash(Self, Locked, Type, #state{index=Index, trees=Trees}) ->
@@ -692,7 +677,7 @@ build_or_rehash(Self, Locked, Type, #state{index=Index, trees=Trees}) ->
     end.
 
 -spec maybe_rebuild(state()) -> state().
-maybe_rebuild(State=#state{lock=undefined, built=true, expired=true, index=Index}) ->
+maybe_rebuild(State=#state{lock=undefined, built=true, expired=true, index=_Index}) ->
     Self = self(),
     Pid = spawn_link(fun() ->
         receive
@@ -702,7 +687,7 @@ maybe_rebuild(State=#state{lock=undefined, built=true, expired=true, index=Index
                 ok
         end
                      end),
-    Locked = get_all_locks(build, Index, Pid),
+    Locked = ok,
     case Locked of
         true ->
             State2 = clear_tree(State),
