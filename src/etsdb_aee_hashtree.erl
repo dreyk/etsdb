@@ -46,7 +46,7 @@ load_trees(Index, Opts) ->
                 end, dict:new(), Params),
             dict:append(Indx, FinalIndxDict, Dict)
         end, dict:new(), Indices),
-    #state{trees = Trees, date_intervals = DateInterval, root_path = RootPath, vnode_index = Index}.
+    #state{trees = Trees, date_intervals = DateIntervals, root_path = RootPath, vnode_index = Index}.
 
 -spec insert(bucket(), kv_list(), #state{}) -> #state{}.
 insert(_Bucket, [], Trees) ->
@@ -157,11 +157,11 @@ do_insert(Indx, Bucket, Data, TreeGroup, #state{date_intervals = DateIntervals, 
     Interval = etsdb_aee_intervals:get_current_interval(DateIntervals),
     dict:update(Interval,
                 fun
-                    (Tree) ->
-                        insert_objects(Bucket, Data, Tree);
                     ('create_new') ->
                         Path = filename:join([RootPath, list_to_integer(Indx), etsdb_aee_intervals:date_interval_to_string(Interval)]),
                         Tree = etsdb_hashtree:new({Indx, Indx}, Path),
+                        insert_objects(Bucket, Data, Tree);
+                    (Tree) ->
                         insert_objects(Bucket, Data, Tree)
                 end,
                 'crate_new', TreeGroup).
@@ -170,12 +170,12 @@ do_insert(Indx, Bucket, Data, TreeGroup, #state{date_intervals = DateIntervals, 
 do_expire(_Indx, Bucket, Keys, TreeGroup, #state{date_intervals = DateIntervals}) ->
     Intervals = etsdb_aee_intervals:get_keys_intervals(Bucket, Keys, DateIntervals),
     lists:foldl(
-        fun({Interval, Keys}, WorkTreeGroup) ->
+        fun({Interval, IKeys}, WorkTreeGroup) ->
             case dict:is_key(Interval, WorkTreeGroup) of
                 true ->
                     dict:update(Interval,
                                 fun(Tree) ->
-                                    remove_objects(Bucket, Keys, Tree)
+                                    remove_objects(Bucket, IKeys, Tree)
                                 end, WorkTreeGroup);
                 false ->
                     lager:warning("Expiring objects (~p) from nonexisting interval: ~p", [Keys, Interval]),
@@ -202,11 +202,11 @@ remove_objects(_Bucket, Keys, Tree) ->
 
 -spec rehash_indx(tree_group(), index(), #state{}) -> tree_group().
 rehash_indx(TreeGroup, Partition, #state{vnode_index = NodeIndex, buckets = Buckets}) ->
-    ScanReqs = dict:map(
+    dict:map(
         fun(Interval, Tree) ->
             Ref = make_ref(),
-            generate_rehash_scan_req(Partition, Interval, Tree, Buckets),
-            etsdb_vnode:scan(Ref, NodeIndex, ScanReqs),
+            ScanReq = generate_rehash_scan_req(Partition, Interval, Tree, Buckets),
+            etsdb_vnode:scan(Ref, NodeIndex, ScanReq),
             TimeOut = zont_pretty_time:to_millisec({1, h}), %% TODO determine rehash timeout
             receive
                 {r, _Index,Ref, {ok, #rehash_state{tree = NewTree}}} ->
@@ -247,8 +247,12 @@ do_rehash_insert(K, V, Tree)->
 
 -spec hash_object(bucket(), term()) -> binary().
 hash_object(_bucket, Obj) when is_binary(Obj) ->
-    crypto:md5(Obj);
+    crypto:hash(md5, Obj);
 hash_object(Bucket, Obj) ->
     Bucket:hash_bject(Obj).
+
+
+converge(_Arg0, _Arg1) ->
+    error(not_implemented).
 
 
