@@ -47,13 +47,13 @@
 -include("etsdb_request.hrl").
 -include_lib("riak_core/include/riak_core_vnode.hrl").
 
--type partition() :: {non_neg_integer(), node()}.
+-type aee_partition() :: chash:node_entry().
 -type remote_fun() :: term().
 
--record(etsdb_exchange_remote_req, {partition::partition()}).
+-record(etsdb_exchange_remote_req, {partition::aee_partition()}).
 -define(EXCHANGE_REMOTE_REQ, #etsdb_exchange_remote_req).
 
--record(etsdb_exchange_req, {partition::partition(), remote_fun::remote_fun()}).
+-record(etsdb_exchange_req, {partition:: aee_partition(), remote_fun::remote_fun()}).
 -define(EXCHANGE_REQ, #etsdb_exchange_req).
 
 
@@ -81,11 +81,11 @@ scan(ReqID,Vnode,Scans)->
 get_query(ReqID,Preflist,Bucket,Query)->
     riak_core_vnode_master:command(Preflist,#etsdb_get_query_req_v1{get_query=Query,req_id=ReqID,bucket=Bucket},{fsm,undefined,self()},etsdb_vnode_master).
 
--spec get_exchange_remote(partition(), partition()) -> remote_fun().
+-spec get_exchange_remote(aee_partition(), aee_partition()) -> remote_fun().
 get_exchange_remote(MasterPartition, Partition)->
     riak_core_vnode_master:command([Partition], ?EXCHANGE_REMOTE_REQ{partition = MasterPartition}, {fsm,undefined,self()},etsdb_vnode_master).
 
--spec exchange_partition(partition(), partition(), remote_fun()) -> any().
+-spec exchange_partition(aee_partition(), aee_partition(), remote_fun()) -> any().
 exchange_partition(MasterPartition, Partition, Remote) ->
     ExchFun = riak_core_vnode_master:command([Partition], ?EXCHANGE_REQ{partition = MasterPartition, remote_fun = Remote},{fsm,undefined,self()},etsdb_vnode_master),
     ExchFun().
