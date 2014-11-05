@@ -36,7 +36,7 @@
 -define(SERVER, ?MODULE).
 
 -type index() :: vnode:index().
--type partition() :: {index(), node()}.
+-type partition() :: etsdb_vnode:aee_partition().
 -type start_options() :: [start_option()].
 -type time_interval() :: zont_pretty_time:time_interval().
 -type start_option() :: {granularity, time_interval()} | {reahsh_interval, time_interval()}| {granularity_intervals_to_expire, pos_integer()} | {path, string()}.
@@ -51,7 +51,7 @@
 -record(expire_event, {bucket::bucket(), keys::[binary()]}).
 -record(rehashdone_event, {result::atom()}).
 -record(start_exchange_remote_event, {partition::index()}).
--record(start_exchnage_event, {partition::index(), remote_fun::remote_fun()}).
+-record(start_exchnage_event, {partition::index(), remote_fun::remote_fun(), local_vnode::partition(), remote_vnode::partition()}).
 -record(finish_exchange_event, {update}).
 -record(merge_event, {trees}).
 
@@ -69,6 +69,8 @@ lookup(Index) ->
     gproc:lookup_local_name(Index).
 
 -spec insert(index(), bucket(), kv_list()) -> ok.
+insert(_Index, 'aee_exchange_bucket', _) ->
+    ok;
 insert(Index, Bucket, Value) ->
     HashedObjects = lists:keymap(fun(Obj) -> etsdb_aee_hashtree:hash_object(Bucket, Obj) end, 2, Value),
     gen_fsm:send_event(lookup(Index), #insert_event{bucket = Bucket, value = HashedObjects}).
@@ -80,8 +82,8 @@ expire(Index, Bucket, Keys) ->
 
 %% exchange
 -spec get_exchange_fun(partition(), partition(), remote_fun()) -> any().
-get_exchange_fun({Index, _node}, {Partition, _master_node}, Remote) ->
-    gen_fsm:sync_send_event(lookup(Index), #start_exchnage_event{partition = Partition, remote_fun = Remote}).
+get_exchange_fun({Index, _node} = LocalPartition, {Partition, _master_node} = RemotePartition, Remote) ->
+    gen_fsm:sync_send_event(lookup(Index), #start_exchnage_event{partition = Partition, remote_fun = Remote, local_vnode = LocalPartition, remote_vnode = RemotePartition}).
 
 -spec get_exchange_remote(partition(), partition()) -> remote_fun().
 get_exchange_remote({Index, _node}, {Partition, _master_node}) ->
@@ -137,11 +139,13 @@ wait_cmd(#start_exchange_remote_event{partition = Partition}, _From, State = #st
             gen_fsm:send_event(Pid, #merge_event{trees = NewTrees})
         end,
     {reply, Remote, exchanging, State};
-wait_cmd(#start_exchnage_event{partition = Partition, remote_fun = Remote}, _From, State = #state{trees = Trees}) ->
+
+wait_cmd(#start_exchnage_event{partition = Partition, remote_fun = Remote, local_vnode = LocalVNode, remote_vnode = RemoteVnode},
+         _From, State = #state{trees = Trees}) ->
     Pid = self(),
     Node = node(),
     ExchangeFun = fun() ->
-        Update = etsdb_aee_hashtree:exchange(Node, Partition, Remote, Trees),
+        Update = etsdb_aee_hashtree:exchange(LocalVNode, RemoteVnode, Node, Partition, Remote, Trees),
         gen_fsm:send_event(Pid, #finish_exchange_event{update = Update})
     end,
     {reply, ExchangeFun, exchanging, State}.

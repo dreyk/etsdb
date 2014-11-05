@@ -12,7 +12,7 @@
 -include("etsdb_request.hrl").
 
 %% API
--export([load_trees/2, insert/3, expire/3, get_xchg_remote/3, exchange/4, merge_trees/2, rehash/2, hash_object/2]).
+-export([load_trees/2, insert/3, expire/3, get_xchg_remote/3, exchange/6, merge_trees/2, rehash/2, hash_object/2]).
 
 -type start_options() :: etsdb_aee:start_options().
 -type index() :: etsdb_aee:index().
@@ -23,6 +23,7 @@
 -type tree_update() :: {replace, index(), tree_group()}.
 -type update_fun() :: fun( (tree_update())->any() ).
 -type date_intervals() :: etsdb_aee_intervals:time_intervals().
+-type tree() :: term().
 
 -record(state, {trees::tree_group(), date_intervals::date_intervals(), root_path::string(), vnode_index::index(), buckets::[bucket()]}).
 
@@ -75,16 +76,22 @@ get_xchg_remote(Node, Indx, #state{trees = Trees}) ->
         end
     end.
 
--spec exchange(node(), index(), remote_fun(), #state{}) -> tree_update().
-exchange(Node, Indx, Remote, #state{trees = Trees}) ->
+
+-record(converge_state, {tree::tree(), updated = false, local_vnode::etsdb_aee:partition(), remote_vnode::etsdb_aee:partition()}).
+
+-spec exchange(etsdb_aee:partition(), etsdb_aee:partition(), node(), index(), remote_fun(), #state{}) -> tree_update().
+exchange(LocalVNode, RemoteVnode, Node, Indx, Remote, #state{trees = Trees}) ->
     {ok, TreeGroup} = dict:find(Indx, Trees),
     NewTreeGroup = dict:map(
         fun(Interval, Tree) ->
             case etsdb_aee_intervals:should_exchange_interval(Interval) of
                 true ->
                     RemoteForInterval = Remote(Interval),
-                    {ok, {NewTree, IsUpdated}}
-                        = rpc:call(Node, etsdb_hashtree, compare, [Tree, RemoteForInterval, fun converge/2, {Tree, false}]),
+                    {ok, #converge_state{tree = NewTree, updated = IsUpdated}}
+                        = rpc:call(Node, etsdb_hashtree, compare, [Tree, RemoteForInterval, fun converge/2,
+                                                                   #converge_state{tree = Tree,
+                                                                                   local_vnode = LocalVNode,
+                                                                                   remote_vnode = RemoteVnode}]),
                     if
                         (IsUpdated) ->
                             NewTree;
@@ -135,7 +142,7 @@ load_indices(Index) ->
     lists:sublist(Indices, 3). %% TODO determine actual preflist size
 
 
--type process_fun() :: fun( (bucket(), term(), tree_group(), #state{}) -> tree_group() ).
+-type process_fun() :: fun( (index(), bucket(), term(), tree_group(), #state{}) -> tree_group() ).
 -spec process_operation(process_fun(), binary(), bucket(), term(), #state{}) -> #state{}.
 process_operation(Fun, RefKey, Bucket, Data, State = #state{trees = Trees}) ->
     {ok, Ring} = riak_core_ring_manager:get_my_ring(),
@@ -158,7 +165,7 @@ do_insert(Indx, Bucket, Data, TreeGroup, #state{date_intervals = DateIntervals, 
     dict:update(Interval,
                 fun
                     ('create_new') ->
-                        Path = filename:join([RootPath, list_to_integer(Indx), etsdb_aee_intervals:date_interval_to_string(Interval)]),
+                        Path = filename:join([RootPath, integer_to_list(Indx), etsdb_aee_intervals:date_interval_to_string(Interval)]),
                         Tree = etsdb_hashtree:new({Indx, Indx}, Path),
                         insert_objects(Bucket, Data, Tree);
                     (Tree) ->
@@ -183,14 +190,14 @@ do_expire(_Indx, Bucket, Keys, TreeGroup, #state{date_intervals = DateIntervals}
             end
         end, TreeGroup, Intervals).
 
--spec insert_objects(bucket(), kv_list(), term()) -> term().
+-spec insert_objects(bucket(), kv_list(), tree()) -> tree().
 insert_objects(_Bucket, Objects, Tree) ->
     lists:foldl(
         fun({K, V}, WorkTree) ->
             etsdb_hashtree:insert(K, V, WorkTree)
         end, Tree, Objects).
 
--spec remove_objects(bucket(), [binary()], term()) -> term().
+-spec remove_objects(bucket(), [binary()], tree()) -> tree().
 remove_objects(_Bucket, Keys, Tree) ->
     lists:foldl(
         fun(K, WorkTree) ->
@@ -222,7 +229,7 @@ rehash_indx(TreeGroup, Partition, #state{vnode_index = NodeIndex, buckets = Buck
                 end
         end, TreeGroup).
 
--spec generate_rehash_scan_req(index(), etsdb_aee_intervals:time_inerval(), term(), [bucket()]) -> term().
+-spec generate_rehash_scan_req(index(), etsdb_aee_intervals:time_inerval(), tree(), [bucket()]) -> tree().
 generate_rehash_scan_req(Index, Interval, InitialTree, Buckets) ->
     #pscan_req{
         partition = Index,
@@ -246,7 +253,7 @@ generate_rehash_scan_req(Index, Interval, InitialTree, Buckets) ->
         catch_end_of_data = false
     }.
 
--spec do_rehash_insert(binary(), binary(), term()) -> term().
+-spec do_rehash_insert(binary(), binary(), tree()) -> tree().
 do_rehash_insert(K, V, Tree)->
     etsdb_hashtree:insert(K, hash_object(undefined, V), Tree).
 
@@ -256,8 +263,62 @@ hash_object(_bucket, Obj) when is_binary(Obj) ->
 hash_object(Bucket, Obj) ->
     Bucket:hash_bject(Obj).
 
+-spec converge([etsdb_hashtree:keydiff()], #converge_state{}) -> #converge_state{}.
+converge(KeyDiff, Acc = #converge_state{local_vnode = LocalVNode, remote_vnode = RemoteVNode}) ->
+    {LocalMissing, RemoteMissing} = lists:partition(
+        fun
+            ({missing, _}) ->
+                true;
+            ({remote_missing, _}) ->
+                false
+        end, KeyDiff),
+    copy(RemoteVNode, LocalVNode, LocalMissing),
+    copy(LocalVNode, RemoteVNode, RemoteMissing),
+    IsUpdated = length(LocalMissing) > 0,
+    Acc#converge_state{updated = IsUpdated}.
 
-converge(_Arg0, _Arg1) ->
-    error(not_implemented).
+-record(xcg_copy_state, {current_buffer_size = 0, objects = []}).
+
+-spec copy(etsdb_aee:partition(), etsdb_aee:partition(), [binary()]) -> any().
+copy(From = {Index, _node}, To, KeysToFetch) ->
+    SortedKeys = lists:usort(KeysToFetch),
+    Range = [{Key, Key} || Key <- SortedKeys],
+    BatchSize = if
+                    length(SortedKeys) < 1000 -> %% TODO determine batch size
+                        length(SortedKeys);
+                    true ->
+                        1000
+                end,
+    ScanReq = #pscan_req{
+        partition = Index,
+        n_val = 1,
+        quorum = 1,
+        function = fun(_Backend) ->
+            {StartIterate, _} = hd(Range),
+            FoldFun = fun
+                (KV, #xcg_copy_state{current_buffer_size = Size, objects = Objects}) when Size < 1000 -> %% TODO determine buffer size
+                    #xcg_copy_state{objects = [KV|Objects], current_buffer_size = Size + 1};
+                (KV, #xcg_copy_state{current_buffer_size = 1000, objects = Objects}) -> %% Full Buffer
+                    etsdb_vnode:put_external(make_ref(), [To], 'aee_exchange_bucket', [KV|Objects]),
+                    #xcg_copy_state{objects = [], current_buffer_size = 0};
+                ('end_of_data', #xcg_copy_state{objects = Objects}) ->
+                    etsdb_vnode:put_external(make_ref(), [To], 'aee_exchange_bucket', Objects),
+                    #xcg_copy_state{objects = [], current_buffer_size = 0}
+
+            end,
+            {StartIterate, FoldFun, BatchSize, Range}
+        end,
+        catch_end_of_data = true
+    },
+    Ref = make_ref(),
+    etsdb_vnode:scan(Ref, From, ScanReq),
+    TimeOut = zont_pretty_time:to_millisec({1, h}), %% TODO determine rehash timeout
+    receive
+        {r, _Index,Ref, {ok, _}} ->
+            ok
+    after TimeOut ->
+        lager:error("Exchange scan timeout or failed"),
+        error
+    end.
 
 
