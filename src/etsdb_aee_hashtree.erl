@@ -204,17 +204,22 @@ remove_objects(_Bucket, Keys, Tree) ->
 rehash_indx(TreeGroup, Partition, #state{vnode_index = NodeIndex, buckets = Buckets}) ->
     dict:map(
         fun(Interval, Tree) ->
-            Ref = make_ref(),
-            ScanReq = generate_rehash_scan_req(Partition, Interval, Tree, Buckets),
-            etsdb_vnode:scan(Ref, NodeIndex, ScanReq),
-            TimeOut = zont_pretty_time:to_millisec({1, h}), %% TODO determine rehash timeout
-            receive
-                {r, _Index,Ref, {ok, #rehash_state{tree = NewTree}}} ->
-                    NewTree
-                after TimeOut ->
-                    lager:error("Rehash timeout or failed. Partition ~p on vnode ~p. Interval ~p", [Partition, NodeIndex, Interval]),
+            case etsdb_aee_intervals:should_exchange_interval(Interval) of
+                true ->
+                    Ref = make_ref(),
+                    ScanReq = generate_rehash_scan_req(Partition, Interval, Tree, Buckets),
+                    etsdb_vnode:scan(Ref, NodeIndex, ScanReq),
+                    TimeOut = zont_pretty_time:to_millisec({1, h}), %% TODO determine rehash timeout
+                    receive
+                        {r, _Index,Ref, {ok, #rehash_state{tree = NewTree}}} ->
+                            NewTree
+                        after TimeOut ->
+                            lager:error("Rehash timeout or failed. Partition ~p on vnode ~p. Interval ~p", [Partition, NodeIndex, Interval]),
+                            Tree
+                    end;
+                false ->
                     Tree
-            end
+                end
         end, TreeGroup).
 
 -spec generate_rehash_scan_req(index(), etsdb_aee_intervals:time_inerval(), term(), [bucket()]) -> term().
