@@ -64,20 +64,34 @@ expire(Bucket, Keys = [Key|_], Trees) ->
 -spec get_xchg_remote(node(), index(), #state{}) -> remote_fun().
 get_xchg_remote(Node, Indx, #state{trees = Trees}) ->
     {ok, TreeGroup} = dict:find(Indx, Trees),
-    fun(Interval) ->
-        Tree = dict:find(Interval, TreeGroup),
-        fun
-            (get_bucket, {Lvl, Bucket}) ->
-                {ok, R} = rpc:call(Node, etsdb_hashtree, get_bucket, [Lvl, Bucket, Tree]),
-                R;
-            (key_hashes, Segment) ->
-                {ok, R} = rpc:call(Node, etsdb_hashtree, key_hashes, [Segment, Tree]),
+    fun
+        (xchg_fun, Interval) ->
+            Tree = dict:find(Interval, TreeGroup),
+            fun
+                (get_bucket, {Lvl, Bucket}) ->
+                    {ok, R} = rpc:call(Node, etsdb_hashtree, get_bucket, [Lvl, Bucket, Tree]),
+                    R;
+                (key_hashes, Segment) ->
+                    {ok, R} = rpc:call(Node, etsdb_hashtree, key_hashes, [Segment, Tree]),
+                    R
+            end;
+        (tree, Interval) ->
+            dict:find(Interval, TreeGroup);
+        (update_fun, _Interval) ->
+            fun(Data, Tree) ->
+                {ok, R} = rpc:call(Node, etsdb_aee_hashtree, insert_objects, ['aee_exchange_bucket', Data, Tree]),
                 R
-        end
+            end
     end.
 
 
--record(converge_state, {tree::tree(), updated = false, local_vnode::etsdb_aee:partition(), remote_vnode::etsdb_aee:partition()}).
+-record(converge_state, {local_tree ::tree(),
+                         local_updated = false,
+                         local_vnode::etsdb_aee:partition(),
+                         remote_vnode::etsdb_aee:partition(),
+                         remote_tree::tree(),
+                         remote_tree_upd_fun::function(),
+                         remote_updated = false}).
 
 -spec exchange(etsdb_aee:partition(), etsdb_aee:partition(), node(), index(), remote_fun(), #state{}) -> tree_update().
 exchange(LocalVNode, RemoteVnode, Node, Indx, Remote, #state{trees = Trees}) ->
@@ -86,27 +100,40 @@ exchange(LocalVNode, RemoteVnode, Node, Indx, Remote, #state{trees = Trees}) ->
         fun(Interval, Tree) ->
             case etsdb_aee_intervals:should_exchange_interval(Interval) of
                 true ->
-                    RemoteForInterval = Remote(Interval),
-                    {ok, #converge_state{tree = NewTree, updated = IsUpdated}}
-                        = rpc:call(Node, etsdb_hashtree, compare, [Tree, RemoteForInterval, fun converge/2,
-                                                                   #converge_state{tree = Tree,
+                    RemoteForInterval = Remote(xchg_fun, Interval),
+                    {ok, #converge_state{
+                        local_tree = NewLocalTree,
+                        remote_tree = NewRemoteTree,
+                        local_updated = LocalUpdated,
+                        remote_updated = RemoteUpdated
+                    }} = rpc:call(Node, etsdb_hashtree, compare, [Tree, RemoteForInterval, fun converge/2,
+                                                                   #converge_state{local_tree = Tree,
                                                                                    local_vnode = LocalVNode,
-                                                                                   remote_vnode = RemoteVnode}]),
-                    if
-                        (IsUpdated) ->
-                            NewTree;
-                        true ->
-                            'no_exchange'
-                    end;
+                                                                                   remote_vnode = RemoteVnode,
+                                                                                   remote_tree = Remote(tree, Interval),
+                                                                                   remote_tree_upd_fun = Remote(update_fun, Interval)
+                                                                   }]),
+                    {return_updated(NewLocalTree, LocalUpdated), return_updated(NewRemoteTree, RemoteUpdated)};
                 false ->
-                    'no_exchange'
+                    {'no_exchange', 'no_exchange'}
             end
         end, TreeGroup),
-    UpdateTreeGroup = dict:filter(
-        fun(_, V) ->
-            V =/= 'no_exchange'
-        end, NewTreeGroup),
-    {replace, Indx, UpdateTreeGroup}.
+    {LocalUpdate, RemoteUpdate} = dict:fold(
+        fun(K, {L, R}, {LDict, RDict}) ->
+            {xcg_mb_insert_dict(K, L, LDict), xcg_mb_insert_dict(K, R, RDict)}
+        end, {dict:new(), dict:new()}, NewTreeGroup),
+    etsdb_vnode:aee_merge(RemoteVnode, {replace, Indx, RemoteUpdate}),
+    {replace, Indx, LocalUpdate}.
+
+xcg_mb_insert_dict(_K, 'no_exchange', Dict) ->
+    Dict;
+xcg_mb_insert_dict(K, V, Dict) ->
+    dict:append(K, V, Dict).
+
+return_updated(Tree, true) ->
+    Tree;
+return_updated(_Tree, false) ->
+    'no_exchange'.
 
 -spec merge_trees(tree_update(), #state{}) -> #state{}.
 merge_trees({replace, Indx, UpdTree}, State = #state{trees = Trees}) ->
@@ -264,7 +291,11 @@ hash_object(Bucket, Obj) ->
     Bucket:hash_bject(Obj).
 
 -spec converge([etsdb_hashtree:keydiff()], #converge_state{}) -> #converge_state{}.
-converge(KeyDiff, Acc = #converge_state{local_vnode = LocalVNode, remote_vnode = RemoteVNode}) ->
+converge(KeyDiff, Acc = #converge_state{local_vnode = LocalVNode,
+                                        remote_vnode = RemoteVNode,
+                                        local_tree = LocalTree,
+                                        remote_tree = RemoteTree,
+                                        remote_tree_upd_fun = RemoteTreeFun}) ->
     {LocalMissing, RemoteMissing} = lists:partition(
         fun
             ({missing, _}) ->
@@ -272,15 +303,19 @@ converge(KeyDiff, Acc = #converge_state{local_vnode = LocalVNode, remote_vnode =
             ({remote_missing, _}) ->
                 false
         end, KeyDiff),
-    copy(RemoteVNode, LocalVNode, LocalMissing),
-    copy(LocalVNode, RemoteVNode, RemoteMissing),
-    IsUpdated = length(LocalMissing) > 0,
-    Acc#converge_state{updated = IsUpdated}.
+    LocalTreeFun = fun (Data, Tree) -> insert_objects('aee_exchange_bucket', Data, Tree) end,
+    {ok, NewLocalTree} = copy(RemoteVNode, LocalVNode, LocalMissing, LocalTreeFun, LocalTree),
+    {ok, NewRemoteTree} = copy(LocalVNode, RemoteVNode, RemoteMissing, RemoteTreeFun, RemoteTree),
+    LocalUpdated = length(LocalMissing) > 0,
+    RemoteUpdated = length(RemoteMissing) > 0,
+    Acc#converge_state{local_updated = LocalUpdated, remote_updated = RemoteUpdated, local_tree = NewLocalTree, remote_tree = NewRemoteTree}.
 
--record(xcg_copy_state, {current_buffer_size = 0, objects = []::kv_list(), request::{reference(), [binary()]}}).
+-record(xcg_copy_state, {current_buffer_size = 0, objects = []::kv_list(), request::{reference(), [binary()]} | undefined, tree_fun, tree}).
 
--spec copy(etsdb_aee:partition(), etsdb_aee:partition(), [binary()]) -> any().
-copy(From = {Index, _node}, To, KeysToFetch) ->
+-spec copy(etsdb_aee:partition(), etsdb_aee:partition(), [binary()], function(), tree()) -> any().
+copy(_from, _to, [], _updFun, Tree) ->
+    Tree;
+copy(From = {Index, _node}, To, KeysToFetch, UpdateTreeFun, Tree) ->
     SortedKeys = lists:usort(KeysToFetch),
     Range = [{Key, Key} || Key <- SortedKeys],
     BatchSize = if
@@ -296,13 +331,11 @@ copy(From = {Index, _node}, To, KeysToFetch) ->
         function = fun(_Backend) ->
             {StartIterate, _} = hd(Range),
             FoldFun = fun
-                (KV, State = #xcg_copy_state{current_buffer_size = Size, objects = Objects}) when Size < 1000 -> %% TODO determine buffer size
-                    State#xcg_copy_state{objects = [KV|Objects], current_buffer_size = Size + 1};
-                (KV, State = #xcg_copy_state{current_buffer_size = 1000}) -> %% Full Buffer
-                    put_objects([KV], To, State);
-                ('end_of_data', State) ->
-                    put_objects([], To, State)
-            end,
+                (X, []) ->
+                    aee_xchg_fold(X, #xcg_copy_state{tree_fun = UpdateTreeFun, tree = Tree}, To);
+                (X, Acc) ->
+                    aee_xchg_fold(X, Acc, To)
+                end,
             {StartIterate, FoldFun, BatchSize, Range}
         end,
         catch_end_of_data = true
@@ -311,23 +344,39 @@ copy(From = {Index, _node}, To, KeysToFetch) ->
     etsdb_vnode:scan(pure_message_reply, Ref, From, ScanReq),
     TimeOut = zont_pretty_time:to_millisec({1, h}), %% TODO determine rehash timeout
     receive
-        {Ref, {r, _Index,Ref, {ok, _}}} ->
-            ok
+        {Ref, {r, _Index,Ref, {ok, #xcg_copy_state{tree = NewTree}}}} ->
+            {ok, NewTree}
     after TimeOut ->
         lager:error("Exchange scan timeout or failed"),
         error
     end.
 
+aee_xchg_fold(KV, State = #xcg_copy_state{current_buffer_size = Size, objects = Objects}, _To) when Size < 1000 -> %% TODO determine buffer size
+    State#xcg_copy_state{objects = [KV|Objects], current_buffer_size = Size + 1};
+aee_xchg_fold(KV, State = #xcg_copy_state{current_buffer_size = 1000}, To) -> %% Full Buffer
+    put_objects([KV], To, State);
+aee_xchg_fold('end_of_data', State, To) ->
+    put_objects([], To, State).
+
 -spec put_objects(kv_list(), etsdb_aee:partition(), #xcg_copy_state{}) -> #xcg_copy_state{}.
-put_objects(Add, To, State = #xcg_copy_state{objects = Objects, request = {PrevReqId, PrevObjects}}) ->
+put_objects(Add, To, State = #xcg_copy_state{objects = Objects, request = Req}) ->
     NewObjects = Add + Objects,
     ReqId = make_ref(),
     etsdb_vnode:put_external(pure_message_reply, ReqId, [To], 'aee_exchange_bucket', NewObjects),
-    receive
-        {PrevReqId, {w, _Indx, PrevReqId, ok}} ->
-            State2 = insert_to_hashtree(PrevObjects, State)
+    HashedObjects = lists:keymap(fun(Obj) -> etsdb_aee_hashtree:hash_object('aee_exchange_bucket', Obj) end, 2, NewObjects),
+    case Req of
+        {PrevReqId, PrevObjects} ->
+            receive
+                {PrevReqId, {w, _Indx, PrevReqId, ok}} ->
+                    State2 = insert_to_hashtree(PrevObjects, State)
+            end;
+        undefined ->
+            ok
     end,
-    State2#xcg_copy_state{objects = [], current_buffer_size = 0, request = [{ReqId, NewObjects}]}.
+    State2#xcg_copy_state{objects = [], current_buffer_size = 0, request = [{ReqId, HashedObjects}]}.
 
+-spec insert_to_hashtree(kv_list(), #xcg_copy_state{}) -> #xcg_copy_state{}.
+insert_to_hashtree(Objects, State = #xcg_copy_state{tree = Tree, tree_fun = UpdateTreeFun}) ->
+    State#xcg_copy_state{tree = UpdateTreeFun(Objects, Tree)}.
 
 

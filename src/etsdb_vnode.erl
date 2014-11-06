@@ -42,7 +42,8 @@
          get_query/4,
          scan/3, scan/4,
          get_exchange_remote/2,
-         exchange_partition/3]).
+         exchange_partition/3,
+         aee_merge/2]).
 
 -behaviour(riak_core_vnode).
 
@@ -57,6 +58,9 @@
 
 -record(etsdb_exchange_req, {partition:: aee_partition(), remote_fun::remote_fun()}).
 -define(EXCHANGE_REQ, #etsdb_exchange_req).
+
+-record(etsdb_merge_req, {update}).
+-define(MERGE_REQ, #etsdb_merge_req).
 
 
 %%vnode state
@@ -89,12 +93,30 @@ get_query(ReqID,Preflist,Bucket,Query)->
 
 -spec get_exchange_remote(aee_partition(), aee_partition()) -> remote_fun().
 get_exchange_remote(MasterPartition, Partition)->
-    riak_core_vnode_master:command([Partition], ?EXCHANGE_REMOTE_REQ{partition = MasterPartition}, {fsm,undefined,self()},etsdb_vnode_master).
+    Ref = make_ref(),
+    riak_core_vnode_master:command([Partition], ?EXCHANGE_REMOTE_REQ{partition = MasterPartition}, {raw,Ref,self()},etsdb_vnode_master),
+    receive
+        {Ref, Remote} ->
+            Remote
+    after 10 * 1000 ->
+        error
+    end.
+
 
 -spec exchange_partition(aee_partition(), aee_partition(), remote_fun()) -> any().
 exchange_partition(MasterPartition, Partition, Remote) ->
-    ExchFun = riak_core_vnode_master:command([Partition], ?EXCHANGE_REQ{partition = MasterPartition, remote_fun = Remote},{fsm,undefined,self()},etsdb_vnode_master),
-    ExchFun().
+    Ref = make_ref(),
+    riak_core_vnode_master:command([Partition], ?EXCHANGE_REQ{partition = MasterPartition, remote_fun = Remote},{raw,Ref,self()},etsdb_vnode_master),
+    receive
+        {Ref, ExchFun} ->
+            ExchFun()
+    after 10 * 1000 ->
+        error
+    end.
+
+aee_merge(Node, Update) ->
+    Ref = make_ref(),
+    riak_core_vnode_master:command([Node], ?MERGE_REQ{update = Update},{raw,Ref,self()},etsdb_vnode_master).
 
 %% ---------------------------------------------------------------------------------------------------------------------
 %% Internal functions
@@ -259,7 +281,10 @@ handle_command(?EXCHANGE_REMOTE_REQ{partition = Partition}, _Sender, State = #st
     {reply, Remote, State};
 handle_command(?EXCHANGE_REQ{partition = Partition, remote_fun = Remote}, _Sender, State = #state{vnode_index = Index}) ->
     ExchanheFun = etsdb_aee:get_exchange_fun(Index, Partition, Remote),
-    {reply, ExchanheFun, State}.
+    {reply, ExchanheFun, State};
+handle_command(?MERGE_REQ{update = Update}, _Sender, State = #state{vnode_index = Index}) ->
+    etsdb_aee:merge(Index, Update),
+    {noreply, State}.
     
 
 handle_info(timeout,State)->

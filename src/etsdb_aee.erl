@@ -12,7 +12,7 @@
 -behaviour(gen_fsm).
 
 %% API
--export([start_link/2, insert/3, expire/3, lookup/1, get_exchange_remote/2, get_exchange_fun/3]).
+-export([start_link/2, insert/3, expire/3, lookup/1, get_exchange_remote/2, get_exchange_fun/3, merge/2]).
 
 %% gen_fsm callbacks
 -export([init/1,
@@ -89,7 +89,9 @@ get_exchange_fun({Index, _node} = LocalPartition, {Partition, _master_node} = Re
 get_exchange_remote({Index, _node}, {Partition, _master_node}) ->
     gen_fsm:sync_send_event(lookup(Index), #start_exchange_remote_event{partition = Partition}).
 
-%% internal: aee worker interaction
+-spec merge(index(), term()) -> any().
+merge(Index, Update) ->
+    gen_fsm:send_event(lookup(Index), #merge_event{trees = Update}).
 
 
 %%%=====================================================================================================================
