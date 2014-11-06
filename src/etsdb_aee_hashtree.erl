@@ -215,10 +215,10 @@ rehash_indx(TreeGroup, Partition, #state{vnode_index = NodeIndex, buckets = Buck
                 true ->
                     Ref = make_ref(),
                     ScanReq = generate_rehash_scan_req(Partition, Interval, Tree, Buckets),
-                    etsdb_vnode:scan(Ref, NodeIndex, ScanReq),
+                    etsdb_vnode:scan(pure_message_reply, Ref, NodeIndex, ScanReq),
                     TimeOut = zont_pretty_time:to_millisec({1, h}), %% TODO determine rehash timeout
                     receive
-                        {r, _Index,Ref, {ok, #rehash_state{tree = NewTree}}} ->
+                        {Ref, {r, _Index,Ref, {ok, #rehash_state{tree = NewTree}}}} ->
                             NewTree
                         after TimeOut ->
                             lager:error("Rehash timeout or failed. Partition ~p on vnode ~p. Interval ~p", [Partition, NodeIndex, Interval]),
@@ -277,7 +277,7 @@ converge(KeyDiff, Acc = #converge_state{local_vnode = LocalVNode, remote_vnode =
     IsUpdated = length(LocalMissing) > 0,
     Acc#converge_state{updated = IsUpdated}.
 
--record(xcg_copy_state, {current_buffer_size = 0, objects = []}).
+-record(xcg_copy_state, {current_buffer_size = 0, objects = []::kv_list(), request::{reference(), [binary()]}}).
 
 -spec copy(etsdb_aee:partition(), etsdb_aee:partition(), [binary()]) -> any().
 copy(From = {Index, _node}, To, KeysToFetch) ->
@@ -296,29 +296,38 @@ copy(From = {Index, _node}, To, KeysToFetch) ->
         function = fun(_Backend) ->
             {StartIterate, _} = hd(Range),
             FoldFun = fun
-                (KV, #xcg_copy_state{current_buffer_size = Size, objects = Objects}) when Size < 1000 -> %% TODO determine buffer size
-                    #xcg_copy_state{objects = [KV|Objects], current_buffer_size = Size + 1};
-                (KV, #xcg_copy_state{current_buffer_size = 1000, objects = Objects}) -> %% Full Buffer
-                    etsdb_vnode:put_external(make_ref(), [To], 'aee_exchange_bucket', [KV|Objects]),
-                    #xcg_copy_state{objects = [], current_buffer_size = 0};
-                ('end_of_data', #xcg_copy_state{objects = Objects}) ->
-                    etsdb_vnode:put_external(make_ref(), [To], 'aee_exchange_bucket', Objects),
-                    #xcg_copy_state{objects = [], current_buffer_size = 0}
-
+                (KV, State = #xcg_copy_state{current_buffer_size = Size, objects = Objects}) when Size < 1000 -> %% TODO determine buffer size
+                    State#xcg_copy_state{objects = [KV|Objects], current_buffer_size = Size + 1};
+                (KV, State = #xcg_copy_state{current_buffer_size = 1000}) -> %% Full Buffer
+                    put_objects([KV], To, State);
+                ('end_of_data', State) ->
+                    put_objects([], To, State)
             end,
             {StartIterate, FoldFun, BatchSize, Range}
         end,
         catch_end_of_data = true
     },
     Ref = make_ref(),
-    etsdb_vnode:scan(Ref, From, ScanReq),
+    etsdb_vnode:scan(pure_message_reply, Ref, From, ScanReq),
     TimeOut = zont_pretty_time:to_millisec({1, h}), %% TODO determine rehash timeout
     receive
-        {r, _Index,Ref, {ok, _}} ->
+        {Ref, {r, _Index,Ref, {ok, _}}} ->
             ok
     after TimeOut ->
         lager:error("Exchange scan timeout or failed"),
         error
     end.
+
+-spec put_objects(kv_list(), etsdb_aee:partition(), #xcg_copy_state{}) -> #xcg_copy_state{}.
+put_objects(Add, To, State = #xcg_copy_state{objects = Objects, request = {PrevReqId, PrevObjects}}) ->
+    NewObjects = Add + Objects,
+    ReqId = make_ref(),
+    etsdb_vnode:put_external(pure_message_reply, ReqId, [To], 'aee_exchange_bucket', NewObjects),
+    receive
+        {PrevReqId, {w, _Indx, PrevReqId, ok}} ->
+            State2 = insert_to_hashtree(PrevObjects, State)
+    end,
+    State2#xcg_copy_state{objects = [], current_buffer_size = 0, request = [{ReqId, NewObjects}]}.
+
 
 
