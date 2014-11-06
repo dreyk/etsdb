@@ -40,7 +40,9 @@
          put_external/4,
          put_external/5,
          get_query/4,
-         scan/3, get_exchange_remote/2, exchange_partition/3]).
+         scan/3, scan/4,
+         get_exchange_remote/2,
+         exchange_partition/3]).
 
 -behaviour(riak_core_vnode).
 
@@ -71,11 +73,15 @@ start_vnode(I) ->
 put_internal(ReqID,Preflist,Data)->
     riak_core_vnode_master:command(Preflist,#etsdb_innerstore_req_v1{value=Data,req_id=ReqID},{fsm,undefined,self()},etsdb_vnode_master).
 
+put_external(pure_message_reply,ReqID,Preflist,Bucket,Data)->
+    riak_core_vnode_master:command(Preflist,#etsdb_store_req_v1{value=Data,req_id=ReqID,bucket=Bucket},{raw,ReqID,self()},etsdb_vnode_master);
 put_external(Caller,ReqID,Preflist,Bucket,Data)->
     riak_core_vnode_master:command(Preflist,#etsdb_store_req_v1{value=Data,req_id=ReqID,bucket=Bucket},{fsm,undefined,Caller},etsdb_vnode_master).
 put_external(ReqID,Preflist,Bucket,Data)->
     riak_core_vnode_master:command(Preflist,#etsdb_store_req_v1{value=Data,req_id=ReqID,bucket=Bucket},{fsm,undefined,self()},etsdb_vnode_master).
 
+scan(pure_message_reply, ReqID,Vnode,Scans)->
+    riak_core_vnode_master:command([{Vnode,node()}],#etsdb_get_query_req_v1{get_query=Scans,req_id=ReqID,bucket=custom_scan},{raw,ReqID,self()},etsdb_vnode_master).
 scan(ReqID,Vnode,Scans)->
     riak_core_vnode_master:command([{Vnode,node()}],#etsdb_get_query_req_v1{get_query=Scans,req_id=ReqID,bucket=custom_scan},{fsm,undefined,self()},etsdb_vnode_master).
 get_query(ReqID,Preflist,Bucket,Query)->
