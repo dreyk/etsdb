@@ -364,14 +364,14 @@ put_objects(Add, To, State = #xcg_copy_state{objects = Objects, request = Req}) 
     ReqId = make_ref(),
     etsdb_vnode:put_external(pure_message_reply, ReqId, [To], 'aee_exchange_bucket', NewObjects),
     HashedObjects = lists:keymap(fun(Obj) -> etsdb_aee_hashtree:hash_object('aee_exchange_bucket', Obj) end, 2, NewObjects),
-    case Req of
+    State2 = case Req of
         {PrevReqId, PrevObjects} ->
             receive
                 {PrevReqId, {w, _Indx, PrevReqId, ok}} ->
-                    State2 = insert_to_hashtree(PrevObjects, State)
+                    insert_to_hashtree(PrevObjects, State)
             end;
         undefined ->
-            ok
+            State
     end,
     State2#xcg_copy_state{objects = [], current_buffer_size = 0, request = [{ReqId, HashedObjects}]}.
 
