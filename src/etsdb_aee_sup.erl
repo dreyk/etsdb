@@ -79,7 +79,7 @@ stop_aee(Index) ->
     ignore |
     {error, Reason :: term()}).
 init([]) ->
-    Opts = application:get_all_env(etsdb_aee),
+    {ok, Opts} = application:get_env(etsdb, aee),
     {ok,
         {
             {simple_one_for_one, 10, 10},
