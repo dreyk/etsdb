@@ -47,7 +47,8 @@ load_trees(Index, Opts) ->
                 end, dict:new(), Params),
             dict:append(Indx, FinalIndxDict, Dict)
         end, dict:new(), Indices),
-    #state{trees = Trees, date_intervals = DateIntervals, root_path = RootPath, vnode_index = Index}.
+    Buckets = app_helper:get_env(etsdb,registered_bucket),
+    #state{trees = Trees, date_intervals = DateIntervals, root_path = RootPath, vnode_index = Index, buckets = Buckets}.
 
 -spec insert(bucket(), kv_list(), #state{}) -> #state{}.
 insert(_Bucket, [], Trees) ->
