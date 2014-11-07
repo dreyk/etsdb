@@ -163,7 +163,7 @@ rehash(UpdFun, State = #state{trees = Trees}) ->
 
 -spec load_indices(index())->[index()].
 load_indices(Index) ->
-    Ring = riak_core_ring_manager:get_my_ring(),
+    {ok, Ring} = riak_core_ring_manager:get_my_ring(),
     IndexBin = <<Index:160/integer>>,
     PL = riak_core_ring:preflist(IndexBin, Ring),
     Indices = [Idx || {Idx, _} <- PL],
