@@ -43,9 +43,9 @@ load_trees(Index, Opts) ->
             FinalIndxDict = lists:foldl(
                 fun({Path, Interval}, IndxDict) -> %% then divide every partition by time intervals
                     Tree = etsdb_hashtree:new({Indx, Indx}, Path),
-                    dict:append(Interval, Tree, IndxDict)
+                    dict:store(Interval, Tree, IndxDict)
                 end, dict:new(), Params),
-            dict:append(Indx, FinalIndxDict, Dict)
+            dict:store(Indx, FinalIndxDict, Dict)
         end, dict:new(), Indices),
     Buckets = app_helper:get_env(etsdb,registered_bucket),
     #state{trees = Trees, date_intervals = DateIntervals, root_path = RootPath, vnode_index = Index, buckets = Buckets}.
@@ -129,7 +129,7 @@ exchange(LocalVNode, RemoteVnode, Node, Indx, Remote, #state{trees = Trees}) ->
 xcg_mb_insert_dict(_K, 'no_exchange', Dict) ->
     Dict;
 xcg_mb_insert_dict(K, V, Dict) ->
-    dict:append(K, V, Dict).
+    dict:store(K, V, Dict).
 
 return_updated(Tree, true) ->
     Tree;
