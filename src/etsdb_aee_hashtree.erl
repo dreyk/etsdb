@@ -243,7 +243,7 @@ rehash_indx(TreeGroup, Partition, #state{vnode_index = NodeIndex, buckets = Buck
                 true ->
                     Ref = make_ref(),
                     ScanReq = generate_rehash_scan_req(Partition, Interval, Tree, Buckets),
-                    etsdb_vnode:scan(pure_message_reply, Ref, NodeIndex, ScanReq),
+                    etsdb_vnode:scan(pure_message_reply, Ref, NodeIndex, [ScanReq]),
                     TimeOut = zont_pretty_time:to_millisec({1, h}), %% TODO determine rehash timeout
                     receive
                         {Ref, {r, _Index,Ref, {ok, #rehash_state{tree = NewTree}}}} ->
@@ -342,7 +342,7 @@ copy(From = {Index, _node}, To, KeysToFetch, UpdateTreeFun, Tree) ->
         catch_end_of_data = true
     },
     Ref = make_ref(),
-    etsdb_vnode:scan(pure_message_reply, Ref, From, ScanReq),
+    etsdb_vnode:scan(pure_message_reply, Ref, From, [ScanReq]),
     TimeOut = zont_pretty_time:to_millisec({1, h}), %% TODO determine rehash timeout
     receive
         {Ref, {r, _Index,Ref, {ok, #xcg_copy_state{tree = NewTree}}}} ->
