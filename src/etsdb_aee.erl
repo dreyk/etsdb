@@ -208,7 +208,7 @@ rehashing(#start_exchange_remote_event{}, _From, State = #state{vnode_index = In
 
 do_rehash(State = #state{trees = Trees}) ->
     FsmPid = self(),
-    spawn(
+    spawn_link(
         fun() ->
             Result = etsdb_aee_hashtree:rehash(
                 fun(Update) ->
