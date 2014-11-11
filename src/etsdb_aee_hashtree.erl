@@ -236,54 +236,52 @@ remove_objects(_Bucket, Keys, Tree) ->
 -record(rehash_state, {tree}).
 
 -spec rehash_indx(tree_group(), index(), #state{}) -> tree_group().
-rehash_indx(TreeGroup, Partition, #state{vnode_index = NodeIndex, buckets = Buckets}) ->
-    dict:map(
-        fun(Interval, Tree) ->
-            case etsdb_aee_intervals:should_exchange_interval(Interval) of
-                true ->
-                    Ref = make_ref(),
-                    ScanReq = generate_rehash_scan_req(Partition, Interval, Tree, Buckets),
-                    etsdb_vnode:scan(pure_message_reply, Ref, NodeIndex, [ScanReq]),
-                    TimeOut = zont_pretty_time:to_millisec({1, h}), %% TODO determine rehash timeout
-                    receive
-                        {Ref, {r, _Index,Ref, {ok, #rehash_state{tree = NewTree}}}} ->
-                            NewTree
-                        after TimeOut ->
-                            lager:error("Rehash timeout or failed. Partition ~p on vnode ~p. Interval ~p", [Partition, NodeIndex, Interval]),
-                            Tree
-                    end;
-                false ->
-                    Tree
-                end
-        end, TreeGroup).
+rehash_indx(TreeGroup, Partition, #state{vnode_index = NodeIndex, buckets = Buckets, date_intervals = DateIntervals}) ->
+    Ref = make_ref(),
+    ScanReqs = lists:map(fun(Bucket) -> generate_rehash_scan_req(Partition, TreeGroup, Bucket, DateIntervals) end, Buckets),
+    etsdb_vnode:scan(pure_message_reply, Ref, NodeIndex, ScanReqs),
+    TimeOut = zont_pretty_time:to_millisec({1, h}), %% TODO determine rehash timeout
+    receive
+        {Ref, {r, _Index,Ref, {ok, #rehash_state{tree = NewTree}}}} ->
+            NewTree
+        after TimeOut ->
+            lager:error("Rehash timeout or failed. Partition ~p on vnode ~p.", [Partition, NodeIndex]),
+            TreeGroup
+    end.
 
--spec generate_rehash_scan_req(index(), etsdb_aee_intervals:time_inerval(), tree(), [bucket()]) -> tree().
-generate_rehash_scan_req(Index, Interval, InitialTree, Buckets) ->
+-spec generate_rehash_scan_req(index(), tree(), bucket(), date_intervals()) -> tree().
+generate_rehash_scan_req(Index, InitialTreeGroup, Bucket, DateIntervals) ->
     #pscan_req{
         partition = Index,
         n_val = 1,
         quorum = 1,
         function = fun(_Backend) ->
-            KeyRanges = etsdb_aee_intervals:get_key_ranges_for_interval(Interval, Buckets),
-            {StartIterate, _} = hd(KeyRanges),
-            FoldFun = fun({K, V}, Acc) ->
-                WorkTree = case Acc of
+            Ranges = Bucket:key_ranges(),
+            {StartIterate, _} = hd(Ranges),
+                FoldFun = fun({K, V}, Acc) ->
+                WorkTreeGroup = case Acc of
                                #rehash_state{tree = T} ->
                                    T;
                                [] ->
-                                   InitialTree
+                                   InitialTreeGroup
                            end,
-                #rehash_state{tree = do_rehash_insert(K, V, WorkTree)}
+                #rehash_state{tree = do_rehash_insert(Bucket, K, V, WorkTreeGroup, DateIntervals)}
             end,
             BatchSize = 1000, %% TODO determine batch size
-            {StartIterate, FoldFun, BatchSize, KeyRanges}
+            {StartIterate, FoldFun, BatchSize, Ranges}
         end,
         catch_end_of_data = false
     }.
 
--spec do_rehash_insert(binary(), binary(), tree()) -> tree().
-do_rehash_insert(K, V, Tree)->
-    etsdb_hashtree:insert(K, hash_object(undefined, V), Tree).
+-spec do_rehash_insert(bucket(), binary(), binary(), tree(), date_intervals()) -> tree().
+do_rehash_insert(Bucket, K, V, TreeGroup, DateIntervals)->
+    Interval = etsdb_aee_intervals:get_keys_intervals(Bucket, [K], DateIntervals),
+    dict:update(
+        Interval,
+        fun(Tree) ->
+            etsdb_hashtree:insert(K, hash_object(Bucket, V), Tree)
+        end,
+        TreeGroup).
 
 -spec hash_object(bucket(), term()) -> binary().
 hash_object(_bucket, Obj) when is_binary(Obj) ->

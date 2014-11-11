@@ -17,7 +17,7 @@
 -type bucket() :: etsdb_aee:bucket().
 
 -export([generate_date_intervals/1, date_interval_to_string/1, should_exchange_interval/1, get_current_interval/1,
-    get_keys_intervals/3, get_key_ranges_for_interval/2]).
+    get_keys_intervals/3]).
 
 -spec generate_date_intervals(start_options()) -> time_intervals().
 generate_date_intervals(Opts) ->
@@ -25,7 +25,7 @@ generate_date_intervals(Opts) ->
     NIntervals = zont_data_util:propfind(granularity_intervals_to_expire, Opts),
     Now = zont_time_util:system_time(sec),
     CurrentStart = Now - (Now rem GranularitySecs),
-    Intervals = [{CurrentStart - I*GranularitySecs, CurrentStart - (I + 1)* GranularitySecs} || I <- lists:seq(0, NIntervals - 1)],
+    Intervals = [{CurrentStart - (I + 1)* GranularitySecs, CurrentStart - I*GranularitySecs} || I <- lists:seq(0, NIntervals - 1)],
     Intervals.
 
 -spec date_interval_to_string(time_interval()) -> string().
@@ -54,13 +54,5 @@ get_keys_intervals(Bucket, Keys, DateIntervals) ->
             dict:update(fun (IKeys) -> [K | IKeys] end, KInterval, WorkDict)
         end, EmptyDict, KeysDates),
     dict:to_list(IntervalKeys).
-
--spec get_key_ranges_for_interval(time_interval(), [bucket()]) -> [{binary(), binary()}].
-get_key_ranges_for_interval({Start, End}, Buckets) ->
-    lists:sort(lists:flatmap(
-        fun(Bucket) ->
-            [StartKey, EndKey] = Bucket:key_ranges_for_interval([Start, End]),
-            {StartKey, EndKey}
-        end, Buckets)).
 
 

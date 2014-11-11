@@ -38,7 +38,9 @@
          expire_spec/1,
          serialize/1,
          clear_period/0,
-         scan_partiotions/1]).
+         scan_partiotions/1,
+         key_ranges/0,
+         timestamp_for_keys/1]).
 
 -behaviour(etsdb_bucket).
 
@@ -184,3 +186,26 @@ unserialize_internal(_)->
 
 join_scan(A1,A2)->
     A1++A2.
+
+key_ranges() ->
+    Now = etsdb_util:system_time(),
+    MinKey = sext:encode({?PREFIX, <<>>, Now - ?LIFE_TIME}),
+    MaxKey = sext:encode({"pw", <<>>, Now + 1}),
+
+    MinIKey = sext:encode({?PREFIX_REV,Now - ?LIFE_TIME, <<>>}),
+    MaxIKey = sext:encode({?PREFIX_REV,Now + 1, <<>>}),
+    Keys = {MinKey, MaxKey},
+    IKeys = {MinIKey, MaxIKey},
+    lists:sort([Keys, IKeys]).
+
+timestamp_for_keys(Keys) ->
+    lists:map(
+        fun(Key) ->
+            Time = case sext:decode(Key) of
+                {?PREFIX, _Id, TS} ->
+                    TS;
+                {?PREFIX_REV, TS, _Id} ->
+                    TS
+            end,
+            {Key, Time}
+        end, Keys).

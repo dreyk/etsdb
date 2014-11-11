@@ -32,4 +32,4 @@
 -callback r_quorum() -> pos_integer().
 -callback make_partitions(any()) -> any(). %% TODO @Dreyk provide actual type spec.
 -callback timestamp_for_keys([key()]) -> [{key(), timestamp()}].
--callback key_ranges_for_interval({timestamp(), timestamp()}) -> [{key(), key()}].
+-callback key_ranges() -> [{key(), key()}].
