@@ -105,6 +105,7 @@ merge(Index, Update) ->
 init([Index, Opts]) ->
     RehashTimeout = zont_data_util:propfind(reahsh_interval, Opts, {1, w}),
     timer:apply_interval(zont_pretty_time:to_millisec(RehashTimeout), ?MODULE, rehash, [self()]),
+    lager:info("Etsdb AEE started on vnode ~p", [Index]),
     {ok, init_hashtree, #state{vnode_index = Index, opts = Opts}, 0}.
 
 %%% ====================================================================================================================
@@ -115,6 +116,7 @@ init([Index, Opts]) ->
 init_hashtree(timeout, State = #state{opts = Opts, vnode_index = Index}) ->
     State2 = State#state{trees = etsdb_aee_hashtree:load_trees(Index, Opts)},
     gproc:add_local_name(Index), %% registering only when we can accept commands
+    lager:info("Etsdb AEE init complete on vnode ~p", [Index]),
     do_rehash(State2).
 
 
@@ -185,28 +187,31 @@ rehashing(#expire_event{} = Expire, State = #state{postpone = Postpone}) ->
     State2 = State#state{postpone = [Expire|Postpone]},
     {next_state, rehashing, State2};
 
-rehashing(#merge_event{trees = ExchangedTrees}, State = #state{trees = RecentTrees}) ->
+rehashing(#merge_event{trees = ExchangedTrees}, State = #state{trees = RecentTrees, vnode_index = Index}) ->
+    lager:info("Rehash merge request on vnode ~p", [Index]),
     {next_state, rehashing, State#state{trees = etsdb_aee_hashtree:merge_trees(ExchangedTrees, RecentTrees)}};
 
-rehashing(#rehashdone_event{result = ok}, State = #state{postpone = Reprocess}) ->
+rehashing(#rehashdone_event{result = ok}, State = #state{postpone = Reprocess, vnode_index = Index}) ->
     ToProcess = lists:reverse(lists:usort(Reprocess)),
     Pid = self(),
     lists:foreach(fun(Event) -> gen_fsm:send_event(Pid, Event) end, ToProcess),
     State2 = State#state{postpone = []},
+    lager:info("Rehash complete on vnode ~p", [Index]),
     {next_state, wait_cmd, State2}.
 
 rehashing(#start_exchnage_event{}, _From, State = #state{vnode_index = Index}) ->
-    lager:info("[~p] Can't exchange because busy rehashing just now", [Index]),
+    lager:warning("[~p] Can't exchange because busy rehashing just now", [Index]),
     {reply, busy, rehashing, State};
 rehashing(#start_exchange_remote_event{}, _From, State = #state{vnode_index = Index}) ->
-    lager:info("[~p] Can't exchange because busy rehashing just now", [Index]),
+    lager:warning("[~p] Can't exchange because busy rehashing just now", [Index]),
     {reply, busy, rehashing, State}.
 
 %%%===================================================================
 %%% Internal functions
 %%%===================================================================
 
-do_rehash(State = #state{trees = Trees}) ->
+do_rehash(State = #state{trees = Trees, vnode_index = Index}) ->
+    lager:info("Etsdb AEE rehash request on vnode ~p", [Index]),
     FsmPid = self(),
     spawn_link(
         fun() ->
