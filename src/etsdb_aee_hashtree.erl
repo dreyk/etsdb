@@ -239,11 +239,13 @@ remove_objects(_Bucket, Keys, Tree) ->
 rehash_indx(TreeGroup, Partition, #state{vnode_index = NodeIndex, buckets = Buckets, date_intervals = DateIntervals}) ->
     Ref = make_ref(),
     ScanReqs = lists:map(fun(Bucket) -> generate_rehash_scan_req(Partition, TreeGroup, Bucket, DateIntervals) end, Buckets),
-    etsdb_vnode:scan(pure_message_reply, Ref, NodeIndex, ScanReqs),
+    ok = etsdb_vnode:scan(pure_message_reply, Ref, NodeIndex, ScanReqs),
     TimeOut = zont_pretty_time:to_millisec({1, h}), %% TODO determine rehash timeout
     receive
         {Ref, {r, _Index,Ref, {ok, #rehash_state{tree = NewTree}}}} ->
-            NewTree
+            NewTree;
+        {Ref, {r, _Index,Ref, {ok, []}}} -> %% no items were found while scan
+            TreeGroup
         after TimeOut ->
             lager:error("Rehash timeout or failed. Partition ~p on vnode ~p.", [Partition, NodeIndex]),
             TreeGroup
