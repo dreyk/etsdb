@@ -64,19 +64,4 @@ init_riak_core_services()->
 start_test()->
     erlang:spawn(fun()->start_test_inner() end).
 start_test_inner() ->
-    ok = application:start(sasl),
-    ok = application:start(os_mon),
-    ok = application:start(crypto),
-    ok = application:start(compiler),
-    ok = application:start(syntax_tools),
-    ok = application:start(lager),
-    ok = application:start(riak_sysmon),
-    ok = application:start(inets),
-    ok = application:start(public_key),
-    ok = application:start(ssl),
-    ok = application:start(xmerl),
-    ok = application:start(mochiweb),
-    ok = application:start(webmachine),
-    ok = application:start(riak_core),
-    ok = application:start(riak_api),
-    ok = application:start(etsdb).
+  ok = etsdb_util:start_app(etsdb).

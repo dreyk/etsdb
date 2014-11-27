@@ -160,7 +160,7 @@ multi_fold(Order,Ref,FoldOpts,StartIterate,Fun,BatchSize, Acc, Patterns)->
                           _->
                               eleveldb:fold(Ref,Fun,Acc,[{first_key,StartIterate} | FoldOpts])
                              end,
-        CatchEOD = zont_data_util:propfind(catch_end_of_data, FoldOpts, false),
+        CatchEOD = etsdb_util:propfind(catch_end_of_data, FoldOpts, false),
         FoldResult = catch_end_of_data(CatchEOD, Fun, FoldResult0, Order, Ref, FoldOpts, BatchSize, Patterns),
         if
             Order==reverse->
@@ -186,12 +186,12 @@ is_empty(#state{ref=Ref}) ->
    eleveldb:is_empty(Ref).
 
 fold_objects(FoldObjectsFun, Acc, #state{fold_opts=FoldOpts,ref=Ref}) ->  
-    FoldFun = fun({StorageKey, Value}, Acc) ->
+    FoldFun = fun({StorageKey, Value}, Acc1) ->
                       try
-                          FoldObjectsFun(StorageKey, Value, Acc)
+                          FoldObjectsFun(StorageKey, Value, Acc1)
                       catch
                           stop_fold->
-                                  throw({break, Acc})
+                                  throw({break, Acc1})
                         end
                 end,
     ObjectFolder =
