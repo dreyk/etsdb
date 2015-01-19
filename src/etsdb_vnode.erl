@@ -71,7 +71,9 @@ get_query(ReqID,Preflist,Bucket,Query)->
 %%Init Callback.
 init([Index]) ->
     DeleteMode = app_helper:get_env(etsdb, delete_mode, 3000),
-    {BackEndModule,BackEndProps} = app_helper:get_env(etsdb, backend,{etsdb_leveldb_backend,[{data_root,"./data/leveldb"}]}),
+    DataDir = etsdb_leveldb_affinity:get_path(Index),
+    {BackEndModule,BackEndProps0} = app_helper:get_env(etsdb, backend,{etsdb_leveldb_backend,[]}),
+    BackEndProps = [{data_root, DataDir}|BackEndProps0], %% Use calculated data dir
     %%Start storage backend
     case BackEndModule:init(Index,BackEndProps) of
         {ok,Ref}->

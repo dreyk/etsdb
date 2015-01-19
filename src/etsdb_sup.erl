@@ -44,12 +44,15 @@ init(_Args) ->
                             {size, 100},
                             {max_overflow,0}
                            ],
-    ClirntWorkerPool = {etsdb_client_worker, {poolboy, start_link, [ClientWorkerPoolArgs]},
+    ClientWorkerPool = {etsdb_client_worker, {poolboy, start_link, [ClientWorkerPoolArgs]},
                         permanent, 5000, worker, [poolboy]},
     ProxySupervisor = {etsdb_vnode_put_proxy_sup,
         {etsdb_vnode_put_proxy_sup, start_link, []},
         permanent, 5000, supervisor, [etsdb_vnode_put_proxy_sup]},
-    All = [VMaster,ClirntWorkerPool,ProxySupervisor],
+    LeveldbAffinity = {etsdb_leveldb_affinity,
+        {etsdb_leveldb_affinity, start_link, []},
+        permanent, 5000, worker, [etsdb_leveldb_affinity]},
+    All = [VMaster, ClientWorkerPool,ProxySupervisor, LeveldbAffinity],
     { ok,
         { {one_for_one, 5, 10},
           All}}.
