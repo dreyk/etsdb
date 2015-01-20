@@ -52,16 +52,16 @@ list_test_() ->
 
 string_test_() ->
     Prop = [
-        {data_root, ["./data/leveldb"]},
+        {data_root, ["./data/leveldbXXX"]},
         {write_buffer_size, 8388608},
         {cache_size, 8388608},
         {max_open_files, 100}
     ],
     [
-        ?_assertEqual(get_path(0, Prop), "./data/leveldb"),
-        ?_assertEqual(get_path(1, Prop), "./data/leveldb"),
-        ?_assertEqual(get_path(103353454656754623110575, Prop), "./data/leveldb"),
-        ?_assertEqual(get_path(12335435467564343245236579, Prop), "./data/leveldb")
+        ?_assertEqual(get_path(0, Prop), "./data/leveldbXXX"),
+        ?_assertEqual(get_path(1, Prop), "./data/leveldbXXX"),
+        ?_assertEqual(get_path(103353454656754623110575, Prop), "./data/leveldbXXX"),
+        ?_assertEqual(get_path(12335435467564343245236579, Prop), "./data/leveldbXXX")
     ].
 
 invalid_spec_test_() ->
