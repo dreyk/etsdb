@@ -12,7 +12,9 @@
 %% API
 -export([get_path/2]).
 
+-ifdef(TEST).
 -include_lib("eunit/include/eunit.hrl").
+-endif.
 
 
 -type index()::non_neg_integer().
@@ -35,7 +37,7 @@ get_path(Index, Props) ->
 
 
 %% TEST
-
+-ifdef(TEST).
 list_test_() ->
     Prop = [
                 {data_root, ["./data/leveldb/1", "./data/leveldb/2", "./data/leveldb/3", "./data/leveldb/4", "./data/leveldb/5"]},
@@ -89,3 +91,4 @@ empty_spec_test_() ->
         ?_assertEqual(get_path(103353454656754623110575, Prop), "./data/leveldb"),
         ?_assertEqual(get_path(12335435467564343245236579, Prop), "./data/leveldb")
     ].
+-endif.
