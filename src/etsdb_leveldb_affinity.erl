@@ -54,7 +54,7 @@ list_test_() ->
 
 string_test_() ->
     Prop = [
-        {data_root, ["./data/leveldbXXX"]},
+        {data_root, "./data/leveldbXXX"},
         {write_buffer_size, 8388608},
         {cache_size, 8388608},
         {max_open_files, 100}
