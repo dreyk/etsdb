@@ -21,6 +21,8 @@
 %% @doc it's ets table backend.
 -module(etsdb_leveldb_backend).
 
+-behaviour(etsdb_backend).
+
 -record(state, {ref :: reference(),
                 data_root :: string(),
                 open_opts = [],
