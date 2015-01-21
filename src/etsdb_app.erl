@@ -27,7 +27,7 @@
 -export([
      start/2,
      stop/1,
-     start_test/0]).
+     start_testing/0]).
 
 
 -spec start(Type::term(), StartArgs::term())-> {ok,pid()} | ignore | {error,Error::term()}.
@@ -61,7 +61,7 @@ init_riak_core_services()->
 
 %%Start app in command line.
 %%You may use this fun for debug.
-start_test()->
+start_testing()->
     erlang:spawn(fun()->start_test_inner() end).
 start_test_inner() ->
   ok = etsdb_util:start_app(etsdb).
