@@ -184,8 +184,8 @@ multi_fold(Order,Ref,FoldOpts,StartIterate,Fun,BatchSize, Acc, Patterns)->
             end
     end.
 
-is_empty(#state{ref=Ref}) ->
-   eleveldb:is_empty(Ref).
+is_empty(S = #state{ref=Ref}) ->
+    {eleveldb:is_empty(Ref), S}.
 
 fold_objects(FoldObjectsFun, Acc, #state{fold_opts=FoldOpts,ref=Ref}) ->  
     FoldFun = fun({StorageKey, Value}, Acc1) ->

@@ -267,8 +267,8 @@ handle_coverage(_Request, _KeySpaces, _Sender, ModState)->
    {noreply,ModState}.
 
 is_empty(#state{backend=Mod,backend_ref=Ref}=State)->
-    IsEmpty = Mod:is_empty(Ref),
-    {IsEmpty,State}.
+    {IsEmpty, NewRef} = Mod:is_empty(Ref),
+    {IsEmpty,State#state{backend_ref = NewRef}}.
 
 handle_exit(_Pid,_Reason,State)->
     {noreply,State}.
