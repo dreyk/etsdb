@@ -193,7 +193,7 @@ supersede_backends(1, Backends, BackendModule) ->
 
 -ifdef(TEST).
 
-prepare_test() ->
+a_prepare_test() ->
     meck:new(etsdb_dbsequence_proxy_fileaccess, [strict]),
     meck:new(proxy_test_backend, [non_strict]).
 
@@ -318,7 +318,6 @@ drop_test_() ->
         end
     ].
 
-
 load_backend_test() ->
     mock_read_sequence(),
     meck:expect(proxy_test_backend, init,
@@ -382,7 +381,7 @@ load_backend_test() ->
     ],
     lists:keysort(#backend_info.start_timestamp, ets:tab2list(R#state.source_backends))),
 
-    {_, R5} = load_backend(#backend_info{start_timestamp = 0, last_timestamp = 1, path = "/home/admin/data/0-1"}, R4),
+    {_, R5} = load_backend(#backend_info{start_timestamp = 0, last_timestamp = 1, path = "/home/admin/data/0-1", backend_state = init}, R4),
     ?assertMatch([
         #backend_info{start_timestamp = 0, last_timestamp = 1, backend_state = init},
         #backend_info{start_timestamp = 1, last_timestamp = 2, backend_state = undefined},
@@ -392,7 +391,7 @@ load_backend_test() ->
     ],
     lists:keysort(#backend_info.start_timestamp, ets:tab2list(R#state.source_backends))),
 
-    load_backend(#backend_info{start_timestamp = 1, last_timestamp = 2, path = "/home/admin/data/1-2"}, R5),
+    {_, R6} = load_backend(#backend_info{start_timestamp = 1, last_timestamp = 2, path = "/home/admin/data/1-2"}, R5),
     ?assertMatch([
         #backend_info{start_timestamp = 0, last_timestamp = 1, backend_state = init},
         #backend_info{start_timestamp = 1, last_timestamp = 2, backend_state = init},
@@ -400,12 +399,37 @@ load_backend_test() ->
         #backend_info{start_timestamp = 3, last_timestamp = 4, backend_state = init},
         #backend_info{start_timestamp = 4, last_timestamp = 5, backend_state = undefined}
     ],
-        lists:keysort(#backend_info.start_timestamp, ets:tab2list(R#state.source_backends))).
+        lists:keysort(#backend_info.start_timestamp, ets:tab2list(R#state.source_backends))),
+    meck:expect(proxy_test_backend, init, fun(_,_) -> {error, failed} end),
+    ?assertThrow({error, {backend_load_failed, failed}},
+        load_backend(#backend_info{start_timestamp = 1, last_timestamp = 2, path = "/home/admin/data/4-5"}, R6)).
 
-
-
-tear_down_test() ->
+z_tear_down_test() ->
     meck:unload().
+
+is_empty_test_() ->
+    meck:new(proxy_test_backend, [non_strict]),
+    mock_read_sequence(),
+    meck:expect(proxy_test_backend, stop, fun(_) -> ok end),
+    meck:expect(proxy_test_backend, init, fun(_Partition, _Config) -> {ok, init} end),
+    [
+        fun() ->
+            meck:expect(proxy_test_backend, is_empty, fun(State) -> {true, State} end),
+            Config = [{proxy_source, [proxy_test_backend, deeper_backend]}, {data_root, "/home/admin/data"}, {max_loaded_backends, 3}],
+            {ok, R} = init(112, Config),
+            ?assertMatch({true, #state{}}, is_empty(R))
+        end,
+
+        fun() ->
+            meck:expect(proxy_test_backend, is_empty, fun(State) -> {false, State} end),
+            Config = [{proxy_source, [proxy_test_backend, deeper_backend]}, {data_root, "/home/admin/data"}, {max_loaded_backends, 3}],
+            {ok, R} = init(112, Config),
+            ?assertMatch({false, #state{}}, is_empty(R))
+        end
+    ].
+
+
+
 
 
 %% MOCKS
