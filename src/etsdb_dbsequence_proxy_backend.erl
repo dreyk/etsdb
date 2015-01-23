@@ -84,11 +84,11 @@ save(Bucket, KvList, State = #state{rotation_interval = RotationInterval, source
     TKvList = Bucket:partition_by_time(KvList, RotationInterval),
     try
         NewState = lists:foldl(
-            fun({Start, End, KvList}, CurrState) ->
+            fun({Start, End, IntervalKvList}, CurrState) ->
                 Backend = ets:lookup(Backends, Start),
                 {SafeBackend, SafeState} = load_backend(Backend, CurrState),
                 [#backend_info{start_timestamp = Start, last_timestamp = End, backend_state = BackendState}] = SafeBackend,
-                case Mod:save(Bucket, KvList, BackendState) of
+                case Mod:save(Bucket, IntervalKvList, BackendState) of
                     {ok, S} ->
                         ets:update_element(Backends, Start, {#backend_info.backend_state, S}),
                         SafeState;
@@ -100,8 +100,8 @@ save(Bucket, KvList, State = #state{rotation_interval = RotationInterval, source
             State, TKvList),
         {ok, NewState}
     catch
-        {backend_save_failed, Reason, NewState} ->
-            {error, {backend_save_failed, Reason}, NewState}
+        {backend_save_failed, Reason, NewState2} ->
+            {error, {backend_save_failed, Reason}, NewState2}
     end.
 
 scan(_, _, _) ->
