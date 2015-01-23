@@ -18,7 +18,7 @@
 %% API
 -export([init/2, stop/1, drop/1, save/3, scan/3, scan/5, fold_objects/3, find_expired/2, delete/3, is_empty/1]).
 
--record(backend_info, {start_timestamp, last_timestamp, path, backend_state = undefined, last_accessed = undefined}).
+-record(backend_info, {start_timestamp, end_timestamp, path, backend_state = undefined, last_accessed = undefined}).
 -record(state, {
     partition::non_neg_integer(),
     source_backends,
@@ -78,16 +78,15 @@ drop(SelfState = #state{source_module = SrcModule, source_backends = Backends}) 
             {error, SrcDropResult, SelfState}
     end.
 
-save(_Bucket, [], State) ->
-    {ok, State};
-save(Bucket, KvList, State = #state{rotation_interval = RotationInterval, source_backends = Backends, source_module = Mod}) ->
+save(Bucket, KvList, State = #state{rotation_interval = RotationInterval, source_backends = Backends,
+    source_module = Mod}) ->
     TKvList = Bucket:partition_by_time(KvList, RotationInterval),
     try
         NewState = lists:foldl(
             fun({Start, End, IntervalKvList}, CurrState) ->
-                Backend = ets:lookup(Backends, Start),
+                Backend = get_backend(Backends, Start, CurrState),
                 {SafeBackend, SafeState} = load_backend(Backend, CurrState),
-                [#backend_info{start_timestamp = Start, last_timestamp = End, backend_state = BackendState}] = SafeBackend,
+                #backend_info{start_timestamp = Start, end_timestamp = End, backend_state = BackendState} = SafeBackend,
                 case Mod:save(Bucket, IntervalKvList, BackendState) of
                     {ok, S} ->
                         ets:update_element(Backends, Start, {#backend_info.backend_state, S}),
@@ -145,7 +144,7 @@ init_sequence(Table, Config) ->
             [FromStr, ToStr] = string:tokens(TimeStampRange, "-"),
             Item = #backend_info{
                 start_timestamp = list_to_integer(FromStr),
-                last_timestamp = list_to_integer(ToStr),
+                end_timestamp = list_to_integer(ToStr),
                 path = Path
             },
             ets:insert(Table, Item)
@@ -204,6 +203,22 @@ supersede_backends(1, Backends, BackendModule) ->
     ets:insert(Backends, Updated),
     ok.
 
+get_backend(Backends, Start, State) ->
+    case ets:lookup(Backends, Start) of
+        [B] ->
+            B;
+        [] ->
+            create_backend(Start, State)
+    end.
+
+create_backend(Start, #state{config = Config, source_backends = Backends, rotation_interval = Interval}) ->
+    DataRoot = etsdb_util:propfind(data_root, Config, "./data"),
+    End = Start + Interval,
+    BackendFileName = io_lib:format("~20..0B-~20..0B", [Start, End]),
+    BackendPath = filename:join(DataRoot, BackendFileName),
+    I = #backend_info{start_timestamp = Start, end_timestamp = End, path = BackendPath},
+    ets:insert(Backends, I),
+    I.
 
 %% ------------------------------------ TEST ---------------------------------------------------------------------------
 
@@ -228,11 +243,11 @@ init_test() ->
         rotation_interval = RotationInterval}} = R,
     BaclendsList = lists:keysort(#backend_info.start_timestamp, ets:tab2list(Backends)),
     ?assertEqual([
-        #backend_info{start_timestamp = 0, last_timestamp = 1, path = "/home/admin/data/0-1"},
-        #backend_info{start_timestamp = 1, last_timestamp = 2, path = "/home/admin/data/1-2"},
-        #backend_info{start_timestamp = 2, last_timestamp = 3, path = "/home/admin/data/2-3"},
-        #backend_info{start_timestamp = 3, last_timestamp = 4, path = "/home/admin/data/3-4"},
-        #backend_info{start_timestamp = 4, last_timestamp = 5, path = "/home/admin/data/4-5"}
+        #backend_info{start_timestamp = 0, end_timestamp = 1, path = "/home/admin/data/0-1"},
+        #backend_info{start_timestamp = 1, end_timestamp = 2, path = "/home/admin/data/1-2"},
+        #backend_info{start_timestamp = 2, end_timestamp = 3, path = "/home/admin/data/2-3"},
+        #backend_info{start_timestamp = 3, end_timestamp = 4, path = "/home/admin/data/3-4"},
+        #backend_info{start_timestamp = 4, end_timestamp = 5, path = "/home/admin/data/4-5"}
     ],
     BaclendsList),
     ?assertEqual([{proxy_source, [deeper_backend]}, {data_root, "/home/admin/data"}, {max_loaded_backends, 3},
@@ -275,11 +290,11 @@ drop_test_() ->
             {error, _, #state{source_backends = SrcBackends, current_loaded_backends = CurrLoaded}} = R,
             ?assertEqual(0, CurrLoaded),
             ?assertEqual([
-                #backend_info{start_timestamp = 0, last_timestamp = 1, path = "/home/admin/data/0-1"},
-                #backend_info{start_timestamp = 1, last_timestamp = 2, path = "/home/admin/data/1-2"},
-                #backend_info{start_timestamp = 2, last_timestamp = 3, path = "/home/admin/data/2-3"},
-                #backend_info{start_timestamp = 3, last_timestamp = 4, path = "/home/admin/data/3-4"},
-                #backend_info{start_timestamp = 4, last_timestamp = 5, path = "/home/admin/data/4-5"}
+                #backend_info{start_timestamp = 0, end_timestamp = 1, path = "/home/admin/data/0-1"},
+                #backend_info{start_timestamp = 1, end_timestamp = 2, path = "/home/admin/data/1-2"},
+                #backend_info{start_timestamp = 2, end_timestamp = 3, path = "/home/admin/data/2-3"},
+                #backend_info{start_timestamp = 3, end_timestamp = 4, path = "/home/admin/data/3-4"},
+                #backend_info{start_timestamp = 4, end_timestamp = 5, path = "/home/admin/data/4-5"}
             ],
             lists:keysort(#backend_info.start_timestamp, ets:tab2list(SrcBackends)))
         end,
@@ -293,19 +308,19 @@ drop_test_() ->
             ?assertMatch({
                 error,
                 [
-                    {#backend_info{start_timestamp = 4, last_timestamp = 5, path = "/home/admin/data/4-5", backend_state = some}, fail},
-                    {#backend_info{start_timestamp = 0, last_timestamp = 1, path = "/home/admin/data/0-1", backend_state = some}, fail}
+                    {#backend_info{start_timestamp = 4, end_timestamp = 5, path = "/home/admin/data/4-5", backend_state = some}, fail},
+                    {#backend_info{start_timestamp = 0, end_timestamp = 1, path = "/home/admin/data/0-1", backend_state = some}, fail}
                 ],
                 #state{}
             }, R),
             {error, _, #state{source_backends = SrcBackends, current_loaded_backends = CurrLoaded}} = R,
             ?assertEqual(2, CurrLoaded),
             ?assertEqual([
-                #backend_info{start_timestamp = 0, last_timestamp = 1, path = "/home/admin/data/0-1", backend_state = some},
-                #backend_info{start_timestamp = 1, last_timestamp = 2, path = "/home/admin/data/1-2"},
-                #backend_info{start_timestamp = 2, last_timestamp = 3, path = "/home/admin/data/2-3"},
-                #backend_info{start_timestamp = 3, last_timestamp = 4, path = "/home/admin/data/3-4"},
-                #backend_info{start_timestamp = 4, last_timestamp = 5, path = "/home/admin/data/4-5", backend_state = some}
+                #backend_info{start_timestamp = 0, end_timestamp = 1, path = "/home/admin/data/0-1", backend_state = some},
+                #backend_info{start_timestamp = 1, end_timestamp = 2, path = "/home/admin/data/1-2"},
+                #backend_info{start_timestamp = 2, end_timestamp = 3, path = "/home/admin/data/2-3"},
+                #backend_info{start_timestamp = 3, end_timestamp = 4, path = "/home/admin/data/3-4"},
+                #backend_info{start_timestamp = 4, end_timestamp = 5, path = "/home/admin/data/4-5", backend_state = some}
             ],
                 lists:keysort(#backend_info.start_timestamp, ets:tab2list(SrcBackends)))
         end,
@@ -314,24 +329,24 @@ drop_test_() ->
             {ok, State} = init(112, Config),
             State2 = enable_one_backend(State),
             meck:expect(etsdb_dbsequence_proxy_fileaccess, remove_root_path,
-                fun(DataRoot) when is_list(DataRoot) -> {error, "can't drp root"} end),
+                fun(DataRoot) when is_list(DataRoot) -> ?assert(false) end),
             meck:expect(proxy_test_backend, drop, fun(A) -> ?assertEqual(enabled, A), {error, fail, some} end),
             R = drop(State2),
             ?assertMatch({
                 error,
                 [
-                    {#backend_info{start_timestamp = 4, last_timestamp = 5, path = "/home/admin/data/4-5", backend_state = some}, fail},
-                    {#backend_info{start_timestamp = 0, last_timestamp = 1, path = "/home/admin/data/0-1", backend_state = some}, fail}
+                    {#backend_info{start_timestamp = 4, end_timestamp = 5, path = "/home/admin/data/4-5", backend_state = some}, fail},
+                    {#backend_info{start_timestamp = 0, end_timestamp = 1, path = "/home/admin/data/0-1", backend_state = some}, fail}
                 ],
                 #state{}
             }, R),
             {error, _, #state{source_backends = SrcBackends}} = R,
             ?assertEqual([
-                #backend_info{start_timestamp = 0, last_timestamp = 1, path = "/home/admin/data/0-1", backend_state = some},
-                #backend_info{start_timestamp = 1, last_timestamp = 2, path = "/home/admin/data/1-2"},
-                #backend_info{start_timestamp = 2, last_timestamp = 3, path = "/home/admin/data/2-3"},
-                #backend_info{start_timestamp = 3, last_timestamp = 4, path = "/home/admin/data/3-4"},
-                #backend_info{start_timestamp = 4, last_timestamp = 5, path = "/home/admin/data/4-5", backend_state = some}
+                #backend_info{start_timestamp = 0, end_timestamp = 1, path = "/home/admin/data/0-1", backend_state = some},
+                #backend_info{start_timestamp = 1, end_timestamp = 2, path = "/home/admin/data/1-2"},
+                #backend_info{start_timestamp = 2, end_timestamp = 3, path = "/home/admin/data/2-3"},
+                #backend_info{start_timestamp = 3, end_timestamp = 4, path = "/home/admin/data/3-4"},
+                #backend_info{start_timestamp = 4, end_timestamp = 5, path = "/home/admin/data/4-5", backend_state = some}
             ],
                 lists:keysort(#backend_info.start_timestamp, ets:tab2list(SrcBackends)))
         end
@@ -351,77 +366,77 @@ load_backend_test() ->
 
     Config = [{proxy_source, [proxy_test_backend, deeper_backend]}, {data_root, "/home/admin/data"}, {max_loaded_backends, 3}],
     {ok, R} = init(112, Config),
-    {B, R1} = load_backend(#backend_info{start_timestamp = 0, last_timestamp = 1, path = "/home/admin/data/0-1"}, R),
-    ?assertMatch(#backend_info{start_timestamp = 0, last_timestamp = 1, path = "/home/admin/data/0-1", backend_state = init}, B),
+    {B, R1} = load_backend(#backend_info{start_timestamp = 0, end_timestamp = 1, path = "/home/admin/data/0-1"}, R),
+    ?assertMatch(#backend_info{start_timestamp = 0, end_timestamp = 1, path = "/home/admin/data/0-1", backend_state = init}, B),
     LA = B#backend_info.last_accessed,
     ?assertNotEqual(undefined, LA),
     ?assertEqual([
-        #backend_info{start_timestamp = 0, last_timestamp = 1, path = "/home/admin/data/0-1", backend_state = init, last_accessed = LA},
-        #backend_info{start_timestamp = 1, last_timestamp = 2, path = "/home/admin/data/1-2"},
-        #backend_info{start_timestamp = 2, last_timestamp = 3, path = "/home/admin/data/2-3"},
-        #backend_info{start_timestamp = 3, last_timestamp = 4, path = "/home/admin/data/3-4"},
-        #backend_info{start_timestamp = 4, last_timestamp = 5, path = "/home/admin/data/4-5"}
+        #backend_info{start_timestamp = 0, end_timestamp = 1, path = "/home/admin/data/0-1", backend_state = init, last_accessed = LA},
+        #backend_info{start_timestamp = 1, end_timestamp = 2, path = "/home/admin/data/1-2"},
+        #backend_info{start_timestamp = 2, end_timestamp = 3, path = "/home/admin/data/2-3"},
+        #backend_info{start_timestamp = 3, end_timestamp = 4, path = "/home/admin/data/3-4"},
+        #backend_info{start_timestamp = 4, end_timestamp = 5, path = "/home/admin/data/4-5"}
     ],
     lists:keysort(#backend_info.start_timestamp, ets:tab2list(R#state.source_backends))),
     ?assertEqual(1, R1#state.current_loaded_backends),
 
     meck:expect(proxy_test_backend, init, fun(_Partition, _Config) -> {ok, init} end),
 
-    {_, R2} = load_backend(#backend_info{start_timestamp = 2, last_timestamp = 3, path = "/home/admin/data/2-3"}, R1),
+    {_, R2} = load_backend(#backend_info{start_timestamp = 2, end_timestamp = 3, path = "/home/admin/data/2-3"}, R1),
     ?assertMatch([
-        #backend_info{start_timestamp = 0, last_timestamp = 1, backend_state = init},
-        #backend_info{start_timestamp = 1, last_timestamp = 2, backend_state = undefined},
-        #backend_info{start_timestamp = 2, last_timestamp = 3, backend_state = init},
-        #backend_info{start_timestamp = 3, last_timestamp = 4, backend_state = undefined},
-        #backend_info{start_timestamp = 4, last_timestamp = 5, backend_state = undefined}
+        #backend_info{start_timestamp = 0, end_timestamp = 1, backend_state = init},
+        #backend_info{start_timestamp = 1, end_timestamp = 2, backend_state = undefined},
+        #backend_info{start_timestamp = 2, end_timestamp = 3, backend_state = init},
+        #backend_info{start_timestamp = 3, end_timestamp = 4, backend_state = undefined},
+        #backend_info{start_timestamp = 4, end_timestamp = 5, backend_state = undefined}
     ],
     lists:keysort(#backend_info.start_timestamp, ets:tab2list(R#state.source_backends))),
     ?assertEqual(2, R2#state.current_loaded_backends),
 
-    {_, R3} = load_backend(#backend_info{start_timestamp = 3, last_timestamp = 4, path = "/home/admin/data/3-4"}, R2),
+    {_, R3} = load_backend(#backend_info{start_timestamp = 3, end_timestamp = 4, path = "/home/admin/data/3-4"}, R2),
     ?assertEqual(3, R3#state.current_loaded_backends),
     ?assertMatch([
-        #backend_info{start_timestamp = 0, last_timestamp = 1, backend_state = init},
-        #backend_info{start_timestamp = 1, last_timestamp = 2, backend_state = undefined},
-        #backend_info{start_timestamp = 2, last_timestamp = 3, backend_state = init},
-        #backend_info{start_timestamp = 3, last_timestamp = 4, backend_state = init},
-        #backend_info{start_timestamp = 4, last_timestamp = 5, backend_state = undefined}
+        #backend_info{start_timestamp = 0, end_timestamp = 1, backend_state = init},
+        #backend_info{start_timestamp = 1, end_timestamp = 2, backend_state = undefined},
+        #backend_info{start_timestamp = 2, end_timestamp = 3, backend_state = init},
+        #backend_info{start_timestamp = 3, end_timestamp = 4, backend_state = init},
+        #backend_info{start_timestamp = 4, end_timestamp = 5, backend_state = undefined}
     ],
     lists:keysort(#backend_info.start_timestamp, ets:tab2list(R#state.source_backends))),
 
-    {_, R4} = load_backend(#backend_info{start_timestamp = 3, last_timestamp = 4, path = "/home/admin/data/3-4", backend_state = init}, R3),
+    {_, R4} = load_backend(#backend_info{start_timestamp = 3, end_timestamp = 4, path = "/home/admin/data/3-4", backend_state = init}, R3),
     ?assertEqual(3, R4#state.current_loaded_backends),
     ?assertMatch([
-        #backend_info{start_timestamp = 0, last_timestamp = 1, backend_state = init},
-        #backend_info{start_timestamp = 1, last_timestamp = 2, backend_state = undefined},
-        #backend_info{start_timestamp = 2, last_timestamp = 3, backend_state = init},
-        #backend_info{start_timestamp = 3, last_timestamp = 4, backend_state = init},
-        #backend_info{start_timestamp = 4, last_timestamp = 5, backend_state = undefined}
+        #backend_info{start_timestamp = 0, end_timestamp = 1, backend_state = init},
+        #backend_info{start_timestamp = 1, end_timestamp = 2, backend_state = undefined},
+        #backend_info{start_timestamp = 2, end_timestamp = 3, backend_state = init},
+        #backend_info{start_timestamp = 3, end_timestamp = 4, backend_state = init},
+        #backend_info{start_timestamp = 4, end_timestamp = 5, backend_state = undefined}
     ],
     lists:keysort(#backend_info.start_timestamp, ets:tab2list(R#state.source_backends))),
 
-    {_, R5} = load_backend(#backend_info{start_timestamp = 0, last_timestamp = 1, path = "/home/admin/data/0-1", backend_state = init}, R4),
+    {_, R5} = load_backend(#backend_info{start_timestamp = 0, end_timestamp = 1, path = "/home/admin/data/0-1", backend_state = init}, R4),
     ?assertMatch([
-        #backend_info{start_timestamp = 0, last_timestamp = 1, backend_state = init},
-        #backend_info{start_timestamp = 1, last_timestamp = 2, backend_state = undefined},
-        #backend_info{start_timestamp = 2, last_timestamp = 3, backend_state = init},
-        #backend_info{start_timestamp = 3, last_timestamp = 4, backend_state = init},
-        #backend_info{start_timestamp = 4, last_timestamp = 5, backend_state = undefined}
+        #backend_info{start_timestamp = 0, end_timestamp = 1, backend_state = init},
+        #backend_info{start_timestamp = 1, end_timestamp = 2, backend_state = undefined},
+        #backend_info{start_timestamp = 2, end_timestamp = 3, backend_state = init},
+        #backend_info{start_timestamp = 3, end_timestamp = 4, backend_state = init},
+        #backend_info{start_timestamp = 4, end_timestamp = 5, backend_state = undefined}
     ],
     lists:keysort(#backend_info.start_timestamp, ets:tab2list(R#state.source_backends))),
 
-    {_, R6} = load_backend(#backend_info{start_timestamp = 1, last_timestamp = 2, path = "/home/admin/data/1-2"}, R5),
+    {_, R6} = load_backend(#backend_info{start_timestamp = 1, end_timestamp = 2, path = "/home/admin/data/1-2"}, R5),
     ?assertMatch([
-        #backend_info{start_timestamp = 0, last_timestamp = 1, backend_state = init},
-        #backend_info{start_timestamp = 1, last_timestamp = 2, backend_state = init},
-        #backend_info{start_timestamp = 2, last_timestamp = 3, backend_state = undefined},
-        #backend_info{start_timestamp = 3, last_timestamp = 4, backend_state = init},
-        #backend_info{start_timestamp = 4, last_timestamp = 5, backend_state = undefined}
+        #backend_info{start_timestamp = 0, end_timestamp = 1, backend_state = init},
+        #backend_info{start_timestamp = 1, end_timestamp = 2, backend_state = init},
+        #backend_info{start_timestamp = 2, end_timestamp = 3, backend_state = undefined},
+        #backend_info{start_timestamp = 3, end_timestamp = 4, backend_state = init},
+        #backend_info{start_timestamp = 4, end_timestamp = 5, backend_state = undefined}
     ],
         lists:keysort(#backend_info.start_timestamp, ets:tab2list(R#state.source_backends))),
     meck:expect(proxy_test_backend, init, fun(_,_) -> {error, failed} end),
     ?assertThrow({error, {backend_load_failed, failed}},
-        load_backend(#backend_info{start_timestamp = 1, last_timestamp = 2, path = "/home/admin/data/4-5"}, R6)).
+        load_backend(#backend_info{start_timestamp = 1, end_timestamp = 2, path = "/home/admin/data/4-5"}, R6)).
 
 z_tear_down_test() ->
     meck:unload().
@@ -431,19 +446,61 @@ is_empty_test_() ->
     mock_read_sequence(),
     meck:expect(proxy_test_backend, stop, fun(_) -> ok end),
     meck:expect(proxy_test_backend, init, fun(_Partition, _Config) -> {ok, init} end),
+    Config = [{proxy_source, [proxy_test_backend, deeper_backend]}, {data_root, "/home/admin/data"}, {max_loaded_backends, 3}],
     [
         fun() ->
             meck:expect(proxy_test_backend, is_empty, fun(State) -> {true, State} end),
-            Config = [{proxy_source, [proxy_test_backend, deeper_backend]}, {data_root, "/home/admin/data"}, {max_loaded_backends, 3}],
             {ok, R} = init(112, Config),
             ?assertMatch({true, #state{}}, is_empty(R))
         end,
 
         fun() ->
             meck:expect(proxy_test_backend, is_empty, fun(State) -> {false, State} end),
-            Config = [{proxy_source, [proxy_test_backend, deeper_backend]}, {data_root, "/home/admin/data"}, {max_loaded_backends, 3}],
             {ok, R} = init(112, Config),
             ?assertMatch({false, #state{}}, is_empty(R))
+        end
+    ].
+
+save_test_() ->
+    mock_read_sequence(),
+    meck:expect(proxy_test_backend, stop, fun(_) -> ok end),
+    meck:expect(proxy_test_backend, init, fun(_Partition, _Config) -> {ok, init} end),
+    Config = [{proxy_source, [proxy_test_backend, deeper_backend]}, {data_root, "/home/admin/data"},
+        {max_loaded_backends, 3}, {rotation_interval, {1,s}}],
+    TestData = [{k1, v1}, {k2, v2}, {k3, v3}, {k4, v4}],
+    meck:new(proxy_test_bucket, [non_strict]),
+    meck:expect(proxy_test_bucket, partition_by_time,
+        fun(_Kv, Interval) ->
+            ?assertEqual(1, Interval),
+            [{0, 1, [{k1, v1}]}, {3, 4, [{k2, v2}, {k3, v3}]}, {5, 6, [{k4, v4}]}]
+        end),
+    [
+        fun() ->
+            meck:expect(proxy_test_backend, save,
+                fun(Bucket, KvList, State) ->
+                    ?assertEqual(init, State),
+                    ?assertEqual(proxy_test_bucket, Bucket),
+                    ?assert(
+                        KvList ==  [{k1, v1}]
+                        orelse KvList == [{k2, v2}, {k3, v3}]
+                        orelse KvList == [{k4, v4}]
+                    ),
+                    {ok, saved}
+                end),
+            {ok, R} = init(112, Config),
+            ?assertMatch({ok, #state{}}, save(proxy_test_bucket, TestData, R))
+        end,
+
+        fun() ->
+            meck:expect(proxy_test_backend, save,
+                fun
+                    (_Bucket, [{k2, v2}, {k3, v3}], State) ->
+                        {error, failed, State};
+                    (_, _, State) ->
+                        {ok, State}
+                end),
+            {ok, R} = init(112, Config),
+            ?assertMatch({error, {backend_save_failed, failed}, #state{}}, save(proxy_test_bucket, TestData, R))
         end
     ].
 
