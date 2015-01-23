@@ -23,10 +23,10 @@
     partition::non_neg_integer(),
     source_backends,
     source_module::module(),
-    current_backend::#backend_info{} | undefined,
     config::proplists:proplist(),
     max_loaded_backends::pos_integer(),
-    current_loaded_backends = 0::non_neg_integer()
+    current_loaded_backends = 0::non_neg_integer(),
+    rotation_interval::pos_integer()
 }).
 
 init(Partition, Config) ->
@@ -34,9 +34,10 @@ init(Partition, Config) ->
     init_sequence(SourceBackendsTable, Config),
     [SourceBackend | RestBackends ] = etsdb_util:propfind(proxy_source, Config, [etsdb_leveldb_backend]),
     MaxLoadedBackends = etsdb_util:propfind(max_loaded_backends, Config, 2),
+    RotationInterval = etsdb_pretty_time:to_sec(etsdb_util:propfind(rotation_interval, Config, {30, d})),
     NewConfig = lists:keyreplace(proxy_source, 1, Config, {proxy_source, RestBackends}),
     {ok, #state{partition = Partition, source_backends = SourceBackendsTable, source_module = SourceBackend,
-        config = NewConfig, max_loaded_backends = MaxLoadedBackends}}.
+        config = NewConfig, max_loaded_backends = MaxLoadedBackends, rotation_interval = RotationInterval}}.
 
 
 stop(#state{source_module = SrcModule, source_backends = Backends}) ->
@@ -52,12 +53,12 @@ stop(#state{source_module = SrcModule, source_backends = Backends}) ->
         ok, Backends).
 
 
-drop(SelfState = #state{source_module = SrcModule, source_backends = Backends, current_backend = CurrB}) ->
-    {SrcDropResult, NewCurrBResult} = ets:foldl(
+drop(SelfState = #state{source_module = SrcModule, source_backends = Backends}) ->
+    SrcDropResult= ets:foldl(
         fun
-            (#backend_info{backend_state = undefined}, ResultCurrB) ->
-                ResultCurrB;
-            (I = #backend_info{backend_state = OldState}, {Result, Backend}) ->
+            (#backend_info{backend_state = undefined}, Result) ->
+                Result;
+            (I = #backend_info{backend_state = OldState}, Result) ->
                 {NewResult, NewBackendInfo} = case SrcModule:drop(OldState) of
                     {ok, State} ->
                         {Result, I#backend_info{backend_state = State}};
@@ -66,27 +67,42 @@ drop(SelfState = #state{source_module = SrcModule, source_backends = Backends, c
                         {[{I2, Reason}|Result], I2}
                 end,
                 ets:insert(Backends, NewBackendInfo),
-                NewBackendInfoPattern = NewBackendInfo#backend_info{backend_state = '_'},
-                NewCurrB = case Backend#backend_info{backend_state = '_'} of
-                    NewBackendInfoPattern ->
-                        NewBackendInfo;
-                    _ ->
-                        Backend
-                end,
-                {NewResult, NewCurrB}
+                NewResult
         end,
-        {[], CurrB}, Backends),
-    NewSelfState = SelfState#state{current_backend = NewCurrBResult},
+        [], Backends),
     if
         SrcDropResult =:= [] ->
-            ok = stop(NewSelfState),
-            drop_self(NewSelfState#state{current_loaded_backends = 0});
+            ok = stop(SelfState),
+            drop_self(SelfState#state{current_loaded_backends = 0});
         true ->
-            {error, SrcDropResult, NewSelfState}
+            {error, SrcDropResult, SelfState}
     end.
 
-save(_, _, _) ->
-    erlang:error(not_implemented).
+save(_Bucket, [], State) ->
+    {ok, State};
+save(Bucket, KvList, State = #state{rotation_interval = RotationInterval, source_backends = Backends, source_module = Mod}) ->
+    TKvList = Bucket:partition_by_time(KvList, RotationInterval),
+    try
+        NewState = lists:foldl(
+            fun({Start, End, KvList}, CurrState) ->
+                Backend = ets:lookup(Backends, Start),
+                {SafeBackend, SafeState} = load_backend(Backend, CurrState),
+                [#backend_info{start_timestamp = Start, last_timestamp = End, backend_state = BackendState}] = SafeBackend,
+                case Mod:save(Bucket, KvList, BackendState) of
+                    {ok, S} ->
+                        ets:update_element(Backends, Start, {#backend_info.backend_state, S}),
+                        SafeState;
+                    {error, Reason, S} ->
+                        ets:update_element(Backends, Start, {#backend_info.backend_state, S}),
+                        throw({backend_save_failed, Reason, SafeState})
+                end
+            end,
+            State, TKvList),
+        {ok, NewState}
+    catch
+        {backend_save_failed, Reason, NewState} ->
+            {error, {backend_save_failed, Reason}, NewState}
+    end.
 
 scan(_, _, _) ->
     erlang:error(not_implemented).
@@ -140,7 +156,7 @@ drop_self(State = #state{config = Config}) ->
     DataRoot = etsdb_util:propfind(data_root, Config, "./data"),
     case etsdb_dbsequence_proxy_fileaccess:remove_root_path(DataRoot) of
         true ->
-            {ok, State#state{current_backend = undefined, source_backends = empty_backends_table()}};
+            {ok, State#state{source_backends = empty_backends_table()}};
         {error, Reason} ->
             {error, Reason, State}
     end.
@@ -199,11 +215,17 @@ a_prepare_test() ->
 
 init_test() ->
     mock_read_sequence(),
-    Config = [{proxy_source, [proxy_test_backend, deeper_backend]}, {data_root, "/home/admin/data"}, {max_loaded_backends, 3}],
+    Config = [
+        {proxy_source, [proxy_test_backend, deeper_backend]},
+        {data_root, "/home/admin/data"},
+        {max_loaded_backends, 3},
+        {rotation_interval, {45, d}}
+    ],
     R = init(112, Config),
     ?assertMatch({ok, #state{}}, R),
     {ok, #state{source_backends = Backends, config = ActualConfig, partition = Partition, source_module = SrcMod,
-        current_backend = CurrB, max_loaded_backends = MaxLoaded, current_loaded_backends = CurrLoaded}} = R,
+        max_loaded_backends = MaxLoaded, current_loaded_backends = CurrLoaded,
+        rotation_interval = RotationInterval}} = R,
     BaclendsList = lists:keysort(#backend_info.start_timestamp, ets:tab2list(Backends)),
     ?assertEqual([
         #backend_info{start_timestamp = 0, last_timestamp = 1, path = "/home/admin/data/0-1"},
@@ -213,12 +235,13 @@ init_test() ->
         #backend_info{start_timestamp = 4, last_timestamp = 5, path = "/home/admin/data/4-5"}
     ],
     BaclendsList),
-    ?assertEqual([{proxy_source, [deeper_backend]}, {data_root, "/home/admin/data"}, {max_loaded_backends, 3}], ActualConfig),
+    ?assertEqual([{proxy_source, [deeper_backend]}, {data_root, "/home/admin/data"}, {max_loaded_backends, 3},
+        {rotation_interval, {45, d}}], ActualConfig),
     ?assertEqual(112, Partition),
     ?assertEqual(proxy_test_backend, SrcMod),
-    ?assertEqual(undefined, CurrB),
     ?assertEqual(3, MaxLoaded),
-    ?assertEqual(0, CurrLoaded).
+    ?assertEqual(0, CurrLoaded),
+    ?assertEqual(45 * 24 * 3600, RotationInterval).
 
 stop_test() ->
     mock_read_sequence(),
@@ -238,8 +261,7 @@ drop_test_() ->
             meck:expect(proxy_test_backend, drop, fun(A) -> ?assertEqual(enabled, A), {ok, desibled} end),
             R = drop(State2),
             ?assertMatch({ok, #state{}}, R),
-            {ok, #state{current_backend = CurrB, source_backends = SrcBackends, current_loaded_backends = CurrLoaded}} = R,
-            ?assertEqual(undefined, CurrB),
+            {ok, #state{source_backends = SrcBackends, current_loaded_backends = CurrLoaded}} = R,
             ?assertEqual(0, CurrLoaded),
             ?assertEqual([], ets:tab2list(SrcBackends))
         end,
@@ -250,8 +272,7 @@ drop_test_() ->
                 fun(DataRoot) when is_list(DataRoot) -> {error, "can't drop root"} end),
             R = drop(State),
             ?assertMatch({error, "can't drop root", #state{}}, R),
-            {error, _, #state{current_backend = CurrB, source_backends = SrcBackends, current_loaded_backends = CurrLoaded}} = R,
-            ?assertEqual(undefined, CurrB),
+            {error, _, #state{source_backends = SrcBackends, current_loaded_backends = CurrLoaded}} = R,
             ?assertEqual(0, CurrLoaded),
             ?assertEqual([
                 #backend_info{start_timestamp = 0, last_timestamp = 1, path = "/home/admin/data/0-1"},
@@ -277,9 +298,8 @@ drop_test_() ->
                 ],
                 #state{}
             }, R),
-            {error, _, #state{current_backend = CurrB, source_backends = SrcBackends, current_loaded_backends = CurrLoaded}} = R,
+            {error, _, #state{source_backends = SrcBackends, current_loaded_backends = CurrLoaded}} = R,
             ?assertEqual(2, CurrLoaded),
-            ?assertEqual(#backend_info{start_timestamp = 4, last_timestamp = 5, path = "/home/admin/data/4-5", backend_state = some}, CurrB),
             ?assertEqual([
                 #backend_info{start_timestamp = 0, last_timestamp = 1, path = "/home/admin/data/0-1", backend_state = some},
                 #backend_info{start_timestamp = 1, last_timestamp = 2, path = "/home/admin/data/1-2"},
@@ -305,8 +325,7 @@ drop_test_() ->
                 ],
                 #state{}
             }, R),
-            {error, _, #state{current_backend = CurrB, source_backends = SrcBackends}} = R,
-            ?assertEqual(#backend_info{start_timestamp = 4, last_timestamp = 5, path = "/home/admin/data/4-5", backend_state = some}, CurrB),
+            {error, _, #state{source_backends = SrcBackends}} = R,
             ?assertEqual([
                 #backend_info{start_timestamp = 0, last_timestamp = 1, path = "/home/admin/data/0-1", backend_state = some},
                 #backend_info{start_timestamp = 1, last_timestamp = 2, path = "/home/admin/data/1-2"},
@@ -429,9 +448,6 @@ is_empty_test_() ->
     ].
 
 
-
-
-
 %% MOCKS
 
 mock_read_sequence() ->
@@ -450,8 +466,6 @@ enable_one_backend(S = #state{source_backends = Backends}) ->
     ets:insert(Backends, J),
 
     meck:expect(proxy_test_backend, stop, fun(A) -> ?assert(enabled == A orelse desibled == A), ok end),
-    S#state{current_backend = I, current_loaded_backends = 2}.
-
+    S#state{current_loaded_backends = 2}.
 
 -endif.
-

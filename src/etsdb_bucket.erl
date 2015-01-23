@@ -34,7 +34,8 @@ behaviour_info(callbacks) ->
      {r_val,0},
      {w_quorum,0},
      {r_quorum,0},
-     {make_partitions,1}
+     {make_partitions,1},
+     {partition_by_time,2}
     ];
 behaviour_info(_Other) ->
     undefined.

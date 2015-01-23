@@ -34,7 +34,8 @@
   read/4,
   def_join_fun/2,
   def_end_fun/1,
-  read_spec/3]).
+  read_spec/3,
+  partition_by_time/2]).
 
 -behaviour(etsdb_bucket).
 
@@ -125,3 +126,6 @@ def_end_fun(Data) ->
 
 def_join_fun(NewData, OldData) ->
   orddict:merge(fun(_, V1, _) -> V1 end, NewData, OldData).
+
+partition_by_time(_KvList, _RotationInterval) ->
+  error('not implemented').
