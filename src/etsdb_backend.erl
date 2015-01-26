@@ -33,20 +33,20 @@
 -type scan_result()::{async, fold_function()}.
 -type fold_objects_function() :: fun((key(), value(), acc()) -> acc()).
 
--callback init(partition(), config()) -> {ok, state()} | {error, reason()}.
--callback stop(state()) -> ok.
+-callback init(Partition :: partition(), Config :: config()) -> {ok, state()} | {error, reason()}.
+-callback stop(State :: state()) -> ok.
 
--callback drop(state()) -> state_or_error().
+-callback drop(State :: state()) -> state_or_error().
 
--callback save(bucket(), kv_list(),state()) -> state_or_error().
--callback scan(scan_query(), acc(), state()) -> scan_result().
--callback scan(bucket(), range(), range(), acc(), state()) -> scan_result().
--callback fold_objects(fold_objects_function(), acc(), state()) -> scan_result().
+-callback save(Bucket :: bucket(), Data :: kv_list(), State :: state()) -> state_or_error().
+-callback scan(Request :: scan_query(), Acc :: acc(), State :: state()) -> scan_result().
+-callback scan(Bucket :: bucket(), From :: range(), To :: range(), Acc :: acc(), State :: state()) -> scan_result().
+-callback fold_objects(FoldFun :: fold_objects_function(), Acc :: acc(), State :: state()) -> scan_result().
 
--callback find_expired(bucket(), state()) -> expired_records().
--callback delete(bucket(), [key()], state()) -> state_or_error(). %% should delete records and expired
+-callback find_expired(Bucket :: bucket(), State :: state()) -> expired_records().
+-callback delete(Bucket :: bucket(), KeysToDelete :: [key()], State :: state()) -> state_or_error(). %% should delete records and expired
 
--callback is_empty(state()) -> {boolean(), state()}.
+-callback is_empty(State :: state()) -> {boolean(), state()}.
 
 
 
