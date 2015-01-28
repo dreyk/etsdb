@@ -46,7 +46,7 @@
 -callback find_expired(Bucket :: bucket(), State :: state()) -> expired_records().
 -callback delete(Bucket :: bucket(), KeysToDelete :: [key()], State :: state()) -> state_or_error(). %% should delete records and expired
 
--callback is_empty(State :: state()) -> {boolean(), state()}.
+-callback is_empty(State :: state()) -> boolean().
 
 
 
