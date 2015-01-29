@@ -149,7 +149,6 @@ handle_command(?ETSDB_STORE_REQ{bucket=Bucket,value=Value,req_id=ReqID}, Sender,
                #state{backend=BackEndModule,backend_ref=BackEndRef,vnode_index=Index}=State)->
     case BackEndModule:save(Bucket,Value,BackEndRef) of
         {Result,NewBackEndRef}->
-
             riak_core_vnode:reply(Sender, {w,Index,ReqID,Result});
         {error,Reason,NewBackEndRef}->
             riak_core_vnode:reply(Sender, {w,Index,ReqID,{error,Reason}})
@@ -163,7 +162,8 @@ handle_command(?ETSDB_GET_QUERY_REQ{get_query=Scans,req_id=ReqID,bucket=custom_s
             Fun =
                 fun()->
                         InvokeRes = AsyncWork(),
-                        {r,Index,ReqID,InvokeRes} end,
+                        {r,Index,ReqID,InvokeRes} 
+                end,
             {async, {scan,Fun},Sender, State};
         Result->
             riak_core_vnode:reply(Sender, {r,Index,ReqID,Result}),
