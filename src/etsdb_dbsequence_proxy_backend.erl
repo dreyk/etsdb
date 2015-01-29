@@ -75,20 +75,105 @@ save(Bucket, KvList, State = #state{rotation_interval = RotationInterval}) ->
             
     end.
 
-scan(Query, Acc, State) ->
-    erlang:error(not_implemented).
+scan(Query, Acc, #state{partition = Partition, source_module = Mod}) ->
+    try
+        Resp = lists:foldl(
+            fun({_, Key}, Data) -> 
+                case acquire(Partition, Key) of
+                    {ok, Ref} ->
+                        R = Mod:scan(Query, Data, Ref),
+                        etsdb_backend_manager:release(Partition, Key, undefined),
+                        R;
+                    {error, Reason} ->
+                        etsdb_backend_manager:release(Partition, Key, undefined),
+                        throw({scan_failed, Key, Reason})
+                end
+            end, 
+            Acc, etsdb_backend_manager:list_backends(Partition)),
+        {ok, Resp}
+    catch
+        {scan_failed, Key, Reason} ->
+            {error, scan_failed, Partition, Key, Reason}
+    end.
 
-scan(_, _, _, _, _) ->
-    erlang:error(not_implemented).
 
-fold_objects(_, _, _) ->
-    erlang:error(not_implemented).
+scan(Bucket,From,To,Acc,#state{partition = Partition, source_module = Mod, rotation_interval = ExchangeInterval}) ->
+    Intervals = calc_scan_intervals(From, To, ExchangeInterval),
+    try
+        Resp = lists:foldl(
+            fun(Key, Data) ->
+                case acquire(Partition, Key) of
+                    {ok, Ref} ->
+                        R = Mod:scan(Bucket, From, To, Data, Ref),
+                        etsdb_backend_manager:release(Partition, Key, undefined),
+                        R;
+                    {error, Reason} ->
+                        etsdb_backend_manager:release(Partition, Key, undefined),
+                        throw({scan_failed, Key, Reason})
+                end
+            end,
+            Acc, Intervals),
+        {ok, Resp}
+    catch
+        {scan_failed, Key, Reason} ->
+            {error, scan_failed, Partition, Key, Reason}
+    end.
 
-find_expired(_, _) ->
-    erlang:error(not_implemented).
+fold_objects(FoldObjectsFun, Acc, #state{partition = Partition, source_module = Mod}) ->
+    try
+        Resp = lists:foldl(
+            fun({_, Key}, Data) ->
+                case acquire(Partition, Key) of
+                    {ok, Ref} ->
+                        R = Mod:fold_objects(FoldObjectsFun, Data, Ref),
+                        etsdb_backend_manager:release(Partition, Key, undefined),
+                        R;
+                    {error, Reason} ->
+                        etsdb_backend_manager:release(Partition, Key, undefined),
+                        throw({fold_failed, Key, Reason})
+                end
+            end,
+            Acc, etsdb_backend_manager:list_backends(Partition)),
+        {ok, Resp}
+    catch
+        {fold_failed, Key, Reason} ->
+            {error, fold_failed, Partition, Key, Reason}
+    end.
 
-delete(_, _, _) ->
-    erlang:error(not_implemented).
+find_expired(_Bucket, #state{partition = Partition, config = Config, rotation_interval = ExchangeInterval}) ->
+    ExparartionTime = etsdb_pretty_time:to_sec(etsdb_util:propfind(exparation_time, Config, {24, h})),
+    ExpireBefore = etsdb_util:system_time(sec) - ExparartionTime,
+    ExpireIntervalsUpTo = ExpireBefore - (ExpireBefore rem ExchangeInterval),
+    {_, Intervals} = lists:unzip(etsdb_backend_manager:list_backends(Partition)),
+    ExpiredIntervals = [{expired_interval, I} || I = {_from, To} <- Intervals, To < ExpireIntervalsUpTo],
+    {expired_records, {length(ExpiredIntervals), ExpiredIntervals}}.
+
+delete(_Bucket, Data, #state{partition = Partition, source_module = Mod, config = Config} = State) ->
+    Res = lists:foldl(
+        fun({expired_interval, Interval}, Result) ->
+            case acquire(Partition, Interval) of
+                {ok, Ref} ->
+                    etsdb_backend_manager:delete(Partition, Interval),
+                    case Mod:drop(Ref) of
+                        {ok, NewRef} ->
+                            ok = Mod:stop(NewRef),
+                            file:del_dir(mk_path(Config, Interval)),
+                            Result;
+                        {error, Reason, NewRef} ->
+                            ok = Mod:stop(NewRef),
+                            [{Interval, Reason} | Result]
+                    end;
+                {error, Reason} ->
+                   [{Interval, Reason} | Result] 
+            end
+        end, [], Data),
+    if 
+        Res == [] ->
+            {ok, State};
+        true ->
+            {error, {backends_failed, Res}, State}
+    end.
+
 
 is_empty(#state{source_module = Mod, partition = Partition}) ->
     ets:foldl(
@@ -105,6 +190,16 @@ is_empty(#state{source_module = Mod, partition = Partition}) ->
 
 
 %% PRIVATE
+
+mk_path(Config, {Start, End}) ->
+    DataRoot = etsdb_util:propfind(data_root, Config, "./data"),
+    BackendFileName = io_lib:format("~20..0B-~20..0B", [Start, End]),
+    filename:join(DataRoot, BackendFileName).
+
+calc_scan_intervals(From, To, ExchangeInterval) ->
+    First = From - (From rem ExchangeInterval),
+    Last = To - (To rem ExchangeInterval) + ExchangeInterval,
+    lists:seq(First, Last, ExchangeInterval).
 
 init_sequence(Partition, Config, SrcModule) ->
     DataRoot = etsdb_util:propfind(data_root, Config, "./data"),
