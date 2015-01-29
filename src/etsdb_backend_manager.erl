@@ -12,13 +12,13 @@
 -behaviour(gen_server).
 
 %% API
--export([start_link/1, add/6, acquire/2, release/3, list_backends/1, drop_partition/1]).
+-export([start_link/1, add/6, delete/2, acquire/2, release/3, list_backends/1, drop_partition/1]).
 
 %% Callbacks
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2, terminate/2, code_change/3]).
 
 -type backend_key() :: {Start::non_neg_integer(), End::non_neg_integer()}.
--type backend_description() :: BackendRef :: term() | undefined.
+-type backend_description() :: {BackendRef :: term() | undefined , Key :: backend_key()}.
 
 -record(backend_info, {
     key :: {StartTimestamp :: non_neg_integer(), Partition :: term()},
@@ -51,12 +51,14 @@ add(Partition, Path, From, To, Opts, Module) ->
     gen_server:call(?MODULE, {add, mk_key(#backend_info{partition = Partition, path = Path,
         start_timestamp = From, end_timestamp = To, opts = Opts, module = Module})}).
 
+-spec delete(term(), backend_key()) -> ok.
+delete(Partition, Key) ->
+    gen_server:call(?MODULE, {delete, Partition, Key}).
 
 -spec acquire(term(), backend_key()) ->
     {ok, BackendRef :: term()} | {busy, WaitObject :: term()} | {error, Reason :: term()}.
 acquire(Partition, Key) ->
-    Pid = self(),
-    gen_server:call(?MODULE, {acquire, Partition, Key, Pid}).
+    gen_server:call(?MODULE, {acquire, Partition, Key}).
 
 -spec release(term(), backend_key(), term()) -> ok.
 release(Partition, Key, NewState) ->
@@ -83,8 +85,11 @@ init(Config)->
 handle_call({add, BackendInfo}, _From, State = #state{backends_table = Tab}) ->
     Created = ets:insert_new(Tab, BackendInfo),
     {reply, Created, State};
-handle_call({acquire, Partition, Key, Pid}, _From, State) ->
-    process_acquire_results(load_backend(Partition, Key, State, Pid));
+handle_call({delete, Partition, {From, _To}}, _From, State = #state{backends_table = Tab}) ->
+    ets:delete(Tab, {Partition, From}),
+    {reply, ok, State};
+handle_call({acquire, Partition, Key}, From, State) ->
+    process_acquire_results(load_backend(Partition, Key, State, From));
 handle_call({list_backends, Partition}, _Form, State = #state{backends_table = Tab}) ->
     do_list_backends(Partition, Tab, State);
 handle_call({drop_partition, Partition}, _From, State = #state{backends_table = Tab}) ->
