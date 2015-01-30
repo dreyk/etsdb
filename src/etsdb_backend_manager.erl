@@ -468,7 +468,18 @@ load_backend_test() ->
             ?assertEqual({Ref3, error, {backend_load_failed, failed}}, E)
     after 0 ->
         ?assert(false)
-    end.
+    end,
+
+    {reply, true, R15} = handle_call({add, mk_key(Def#backend_info{partition = 42, 
+        start_timestamp = 4, end_timestamp = 5})}, undefined, R14),
+
+    RR16 = handle_call({drop_partition, 112}, self(), R15),
+    ?assertMatch({reply, [{undefined, {0,1}}, {undefined, {1,2}}, {init, {2,3}}, {undefined, {3,4}}, {init, {4,5}}], _}, RR16),
+    ?assertMatch([
+        #backend_info{partition = 42, start_timestamp = 4, end_timestamp = 5, backend_state = undefined, ref_count = 0}
+    ],
+        lists:keysort(#backend_info.start_timestamp, ets:tab2list(R#state.backends_table))).
+
 
 z_teardown_test() ->
     meck:unload().
