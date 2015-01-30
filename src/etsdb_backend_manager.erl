@@ -83,7 +83,7 @@ init(Config)->
     MaxLoadedBackends = etsdb_util:propfind(max_loaded_backends, Config, 2),
     {ok, #state{
         max_loaded_backends = MaxLoadedBackends,
-        backends_table = ets:new(undefined, [set, private, {keypos, #backend_info.key}])
+        backends_table = ets:new(undefined, [ordered_set, private, {keypos, #backend_info.key}])
     }}.
 
 handle_call({add, BackendInfo}, _From, State = #state{backends_table = Tab}) ->
@@ -94,18 +94,18 @@ handle_call({delete, Partition, {From, _To}}, _From, State = #state{backends_tab
     {reply, ok, State};
 handle_call({acquire, Partition, Key}, From, State) ->
     process_acquire_results(load_backend(Partition, Key, State, From));
-handle_call({list_backends, Partition}, _Form, State = #state{backends_table = Tab}) ->
-    do_list_backends(Partition, Tab, State);
+handle_call({list_backends, Partition}, _Form, State) ->
+    do_list_backends(Partition, State);
 handle_call({drop_partition, Partition}, _From, State = #state{backends_table = Tab}) ->
-    Reply = do_list_backends(Partition, Tab, State),
+    Reply = do_list_backends(Partition, State),
     ets:match_delete(Tab, #backend_info{_='_', partition = Partition}),
     Reply.
 
-do_list_backends(Partition, Tab, State) ->
+do_list_backends(Partition, State  = #state{backends_table = Tab}) ->
     Spec = [{
-        [#backend_info{_ = '_', backend_state = '$1', partition = '$2', start_timestamp = '$3', end_timestamp = '$4'}],
+        #backend_info{_ = '_', backend_state = '$1', partition = '$2', start_timestamp = '$3', end_timestamp = '$4'},
         [{'=:=', '$2', Partition}],
-        [{'$1', {'$3', '$4'}}]
+        [{{'$1', {{'$3', '$4'}}}}]
     }],
     R = ets:select(Tab, Spec),
     {reply, R, State}.
@@ -444,6 +444,8 @@ load_backend_test() ->
     ],
         lists:keysort(#backend_info.start_timestamp, ets:tab2list(R#state.backends_table))),
     ?assertEqual([{{3, 112}, Ref3, self()}], R13#state.wait_queue),
+    BackendsList = handle_call({list_backends, 112}, self(), R13),
+    ?assertEqual({reply, [{undefined, {0,1}}, {init, {1,2}}, {init, {2,3}}, {undefined, {3,4}}, {init, {4,5}}], R13}, BackendsList),
     
     meck:expect(proxy_test_backend, init, fun(_,_) -> {error, failed} end),
 
@@ -467,9 +469,6 @@ load_backend_test() ->
     after 0 ->
         ?assert(false)
     end.
-    
-%%     ?assertThrow({error, {backend_load_failed, failed}},
-%%         load_backend(#backend_info{start_timestamp = 1, end_timestamp = 2, path = "/home/admin/data/4-5"}, R6)).
 
 z_teardown_test() ->
     meck:unload().
