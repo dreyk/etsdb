@@ -34,20 +34,13 @@ init(Partition, Config) ->
         config = NewConfig, rotation_interval = RotationInterval}}.
 
 
-stop(#state{source_module = SrcModule, partition = Partition}) ->
-    lists:foldl(
-        fun
-            ({undefined, _}, ok) ->
-                ok;
-            ({State, _}, ok) ->
-                ok = SrcModule:stop(State)
-        end,
-        ok, etsdb_backend_manager:drop_partition(Partition)).
+stop(#state{partition = Partition}) ->
+    ok = etsdb_backend_manager:drop_partition(Partition).
 
 
 drop(SelfState = #state{source_module = SrcModule, partition = Partition}) ->
     SrcDropResult = lists:foldl(
-        fun({_, Key}, Result) ->
+        fun(Key, Result) ->
             case acquire(Partition, Key) of
                 {ok, Ref} ->
                     do_drop_backend(Partition, Key, SrcModule, Ref, Result);
@@ -67,18 +60,18 @@ drop(SelfState = #state{source_module = SrcModule, partition = Partition}) ->
 
 save(Bucket, KvList, State = #state{rotation_interval = RotationInterval}) ->
     TKvList = Bucket:partition_by_time(KvList, RotationInterval),
-    case lists:foldl(fun(E, Acc) -> do_save(E, Acc, Bucket, State) end, State, TKvList) of
-        ok ->
-            {ok, State};
-        {error, Reason} ->
-            {error, {backend_save_failed, Reason}, State}
+    case lists:foldl(fun(E, {Acc, CurrState}) -> do_save(E, Acc, Bucket, CurrState) end, {ok, State}, TKvList) of
+        {ok, NewState} ->
+            {ok, NewState};
+        {{error, Reason}, NewState} ->
+            {error, {backend_save_failed, Reason}, NewState}
             
     end.
 
 scan(Query, Acc, #state{partition = Partition, source_module = Mod}) ->
     try
         Resp = lists:foldl(
-            fun({_, Key}, Data) -> 
+            fun(Key, Data) ->
                 case acquire(Partition, Key) of
                     {ok, Ref} ->
                         R = Mod:scan(Query, Data, Ref),
@@ -122,7 +115,7 @@ scan(Bucket,From,To,Acc,#state{partition = Partition, source_module = Mod, rotat
 fold_objects(FoldObjectsFun, Acc, #state{partition = Partition, source_module = Mod}) ->
     try
         Resp = lists:foldl(
-            fun({_, Key}, Data) ->
+            fun(Key, Data) ->
                 case acquire(Partition, Key) of
                     {ok, Ref} ->
                         R = Mod:fold_objects(FoldObjectsFun, Data, Ref),
@@ -144,7 +137,7 @@ find_expired(_Bucket, #state{partition = Partition, config = Config, rotation_in
     ExparartionTime = etsdb_pretty_time:to_sec(etsdb_util:propfind(exparation_time, Config, {24, h})),
     ExpireBefore = etsdb_util:system_time(sec) - ExparartionTime,
     ExpireIntervalsUpTo = ExpireBefore - (ExpireBefore rem ExchangeInterval),
-    {_, Intervals} = lists:unzip(etsdb_backend_manager:list_backends(Partition)),
+    Intervals = etsdb_backend_manager:list_backends(Partition),
     ExpiredIntervals = [{expired_interval, I} || I = {_from, To} <- Intervals, To < ExpireIntervalsUpTo],
     {expired_records, {length(ExpiredIntervals), ExpiredIntervals}}.
 
@@ -153,8 +146,7 @@ delete(_Bucket, Data, #state{partition = Partition, source_module = Mod, config 
         fun({expired_interval, Interval}, Result) ->
             case acquire(Partition, Interval) of
                 {ok, Ref} ->
-                    etsdb_backend_manager:delete(Partition, Interval),
-                    case Mod:drop(Ref) of
+                    DropRes = case Mod:drop(Ref) of
                         {ok, NewRef} ->
                             ok = Mod:stop(NewRef),
                             file:del_dir(mk_path(Config, Interval)),
@@ -162,7 +154,9 @@ delete(_Bucket, Data, #state{partition = Partition, source_module = Mod, config 
                         {error, Reason, NewRef} ->
                             ok = Mod:stop(NewRef),
                             [{Interval, Reason} | Result]
-                    end;
+                    end,
+                    etsdb_backend_manager:release(Partition, Interval, delete_backend),
+                    DropRes;
                 {error, Reason} ->
                    [{Interval, Reason} | Result] 
             end
@@ -176,11 +170,11 @@ delete(_Bucket, Data, #state{partition = Partition, source_module = Mod, config 
 
 
 is_empty(#state{source_module = Mod, partition = Partition}) ->
-    ets:foldl(
+    lists:foldl(
         fun
             (_Backend, false) ->
                 false;
-            ({_, Key}, true) ->
+            (Key, true) ->
                 {ok, Ref} = acquire(Partition, Key),
                 R = Mod:is_empty(Ref),
                 etsdb_backend_manager:release(Partition, Key, undefined),
@@ -262,14 +256,14 @@ do_save({Start, End, IntervalKvList}, ok, Bucket, State = #state{partition = Par
             case Mod:save(Bucket, IntervalKvList, Ref) of
                 {ok, S} ->
                     etsdb_backend_manager:release(Partition, Key, S),
-                    ok;
+                    {ok, State};
                 {error, Reason, S} ->
                     etsdb_backend_manager:release(Partition, Key, S),
-                    {error, Reason}
+                    {{error, Reason}, State}
             end
     end;
-do_save(_, {error, Reason}, _, _) ->
-    {error, Reason}.
+do_save(_, {error, Reason}, _, State) ->
+    {{error, Reason}, State}.
 
 %% ------------------------------------ TEST ---------------------------------------------------------------------------
 
@@ -283,7 +277,8 @@ z_tear_down_test() ->
     meck:unload().
 
 is_empty_test_() ->
-    Config = [{proxy_source, [proxy_test_backend, deeper_backend]}, {data_root, "/home/admin/data"}, {max_loaded_backends, 3}],
+    Config = [{proxy_source, [proxy_test_backend, deeper_backend]},
+        {data_root, "/home/admin/data"}, {max_loaded_backends, 3}],
     etsdb_backend_manager:start_link(Config),
     meck:new(proxy_test_backend, [non_strict]),
     mock_read_sequence(),
@@ -291,20 +286,20 @@ is_empty_test_() ->
     meck:expect(proxy_test_backend, init, fun(_Partition, _Config) -> {ok, init} end),
     [
         fun() ->
-            meck:expect(proxy_test_backend, is_empty, fun(State) -> {true, State} end),
+            meck:expect(proxy_test_backend, is_empty, fun(_State) -> true end),
             {ok, R} = init(112, Config),
             ?assertEqual(true, is_empty(R))
         end,
 
         fun() ->
-            meck:expect(proxy_test_backend, is_empty, fun(State) -> {false, State} end),
+            meck:expect(proxy_test_backend, is_empty, fun(_State) -> false end),
             {ok, R} = init(112, Config),
             ?assertEqual(false, is_empty(R))
         end
     ].
 
 save_test_() ->
-    Config = [{proxy_source, [proxy_test_backend, deeper_backend]}, {data_root, "/home/admin/data"}, 
+    Config = [{proxy_source, [proxy_test_backend, deeper_backend]}, {data_root, "/home/admin/data"},
         {max_loaded_backends, 3}, {rotation_interval, {1,s}}],
     etsdb_backend_manager:start_link(Config),
     mock_read_sequence(),
@@ -331,7 +326,10 @@ save_test_() ->
                     {ok, saved}
                 end),
             {ok, R} = init(112, Config),
-            ?assertMatch({ok, #state{}}, save(proxy_test_bucket, TestData, R))
+            RR = save(proxy_test_bucket, TestData, R),
+            ?assertMatch({ok, #state{}}, RR),
+            {ok, S} = RR,
+            ?assertMatch(ok, stop(S))
         end,
 
         fun() ->
@@ -343,7 +341,10 @@ save_test_() ->
                         {ok, State}
                 end),
             {ok, R} = init(112, Config),
-            ?assertMatch({error, {backend_save_failed, failed}, #state{}}, save(proxy_test_bucket, TestData, R))
+            RR = save(proxy_test_bucket, TestData, R),
+            ?assertMatch({error, {backend_save_failed, failed}, #state{}}, RR),
+            {_, _, S} = RR,
+            ?assertMatch(ok, stop(S))
         end
     ].
 

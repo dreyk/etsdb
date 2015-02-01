@@ -16,7 +16,7 @@
 -endif.
 
 %% API
--export([start_link/1, add/6, delete/2, acquire/2, release/3, list_backends/1, drop_partition/1]).
+-export([start_link/1, add/6, acquire/2, release/3, list_backends/1, drop_partition/1]).
 
 %% Callbacks
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2, terminate/2, code_change/3]).
@@ -55,10 +55,6 @@ add(Partition, Path, From, To, Opts, Module) ->
     gen_server:call(?MODULE, {add, mk_key(#backend_info{partition = Partition, path = Path,
         start_timestamp = From, end_timestamp = To, opts = Opts, module = Module})}).
 
--spec delete(term(), backend_key()) -> ok.
-delete(Partition, Key) ->
-    gen_server:call(?MODULE, {delete, Partition, Key}).
-
 -spec acquire(term(), backend_key()) ->
     {ok, BackendRef :: term()} | {busy, WaitObject :: term()} | {error, Reason :: term()}.
 acquire(Partition, Key) ->
@@ -89,26 +85,37 @@ init(Config)->
 handle_call({add, BackendInfo}, _From, State = #state{backends_table = Tab}) ->
     Created = ets:insert_new(Tab, BackendInfo),
     {reply, Created, State};
-handle_call({delete, Partition, {From, _To}}, _From, State = #state{backends_table = Tab}) ->
-    ets:delete(Tab, {Partition, From}),
-    {reply, ok, State};
 handle_call({acquire, Partition, Key}, From, State) ->
     process_acquire_results(load_backend(Partition, Key, State, From));
 handle_call({list_backends, Partition}, _Form, State) ->
-    do_list_backends(Partition, State);
-handle_call({drop_partition, Partition}, _From, State = #state{backends_table = Tab}) ->
-    Reply = do_list_backends(Partition, State),
+    {reply, list_backend_keys(Partition, State), State};
+handle_call({drop_partition, Partition}, _From, State = #state{backends_table = Tab, current_loaded_backends = CurrLoaded}) ->
+    Backends = list_active_backends_refs(Partition, State),
     ets:match_delete(Tab, #backend_info{_='_', partition = Partition}),
-    Reply.
+    TotalStopped = lists:foldl(
+        fun
+            ({BackendState, Mod}, StoppedCnt) ->
+                ok = Mod:stop(BackendState),
+                StoppedCnt + 1
+        end,
+        0, Backends),
+    {reply, ok, State#state{current_loaded_backends = CurrLoaded - TotalStopped}}.
 
-do_list_backends(Partition, State  = #state{backends_table = Tab}) ->
+list_backend_keys(Partition, #state{backends_table = Tab}) ->
     Spec = [{
-        #backend_info{_ = '_', backend_state = '$1', partition = '$2', start_timestamp = '$3', end_timestamp = '$4'},
+        #backend_info{_ = '_', partition = '$2', start_timestamp = '$3', end_timestamp = '$4'},
         [{'=:=', '$2', Partition}],
-        [{{'$1', {{'$3', '$4'}}}}]
+        [{{'$3', '$4'}}]
     }],
-    R = ets:select(Tab, Spec),
-    {reply, R, State}.
+    ets:select(Tab, Spec).
+
+list_active_backends_refs(Partition, #state{backends_table = Tab}) ->
+    Spec = [{
+        #backend_info{_ = '_', backend_state = '$1', partition = '$2', module = '$3'},
+        [{'=:=', '$2', Partition}, {'=/=', '$1', undefined}],
+        [{{'$1', '$3'}}]
+    }],
+    ets:select(Tab, Spec).
 
 
 handle_cast({release, Partition, {From, _To}, NewBackendRef}, State = #state{backends_table = Tab}) ->
@@ -117,7 +124,7 @@ handle_cast({release, Partition, {From, _To}, NewBackendRef}, State = #state{bac
     [#backend_info{ref_count = Cnt}] = I,
     NewCnt = Cnt - 1,
     Upd0 = [{#backend_info.ref_count, NewCnt}],
-    Upd = if 
+    Upd = if
               NewBackendRef =/= undefined ->
                   [{#backend_info.backend_state, NewBackendRef} | Upd0];
               true ->
@@ -127,6 +134,11 @@ handle_cast({release, Partition, {From, _To}, NewBackendRef}, State = #state{bac
     NewState = if
                    NewCnt == 0 ->
                        load_waiting_backends(State);
+                   NewBackendRef == 'delete_backend' ->
+                       ets:delete(Tab, Key),
+                       CurrLoaded = State#state.current_loaded_backends,
+                       UpdState = State#state{current_loaded_backends = CurrLoaded - 1},
+                       load_waiting_backends(UpdState);
                    true ->
                        State
                end,
@@ -248,6 +260,7 @@ init_test() ->
     ?assertMatch({ok, #state{current_loaded_backends = 0, max_loaded_backends = 3, wait_queue = []}}, R).
 
 load_backend_test() ->
+    meck:unload(proxy_test_backend),
     meck:new(proxy_test_backend, [non_strict]),
     meck:expect(proxy_test_backend, init,
         fun(Partition, Config) ->
@@ -445,7 +458,7 @@ load_backend_test() ->
         lists:keysort(#backend_info.start_timestamp, ets:tab2list(R#state.backends_table))),
     ?assertEqual([{{3, 112}, Ref3, self()}], R13#state.wait_queue),
     BackendsList = handle_call({list_backends, 112}, self(), R13),
-    ?assertEqual({reply, [{undefined, {0,1}}, {init, {1,2}}, {init, {2,3}}, {undefined, {3,4}}, {init, {4,5}}], R13}, BackendsList),
+    ?assertEqual({reply, [{0,1}, {1,2}, {2,3}, {3,4}, {4,5}], R13}, BackendsList),
     
     meck:expect(proxy_test_backend, init, fun(_,_) -> {error, failed} end),
 
@@ -474,14 +487,11 @@ load_backend_test() ->
         start_timestamp = 4, end_timestamp = 5})}, undefined, R14),
 
     RR16 = handle_call({drop_partition, 112}, self(), R15),
-    ?assertMatch({reply, [{undefined, {0,1}}, {undefined, {1,2}}, {init, {2,3}}, {undefined, {3,4}}, {init, {4,5}}], _}, RR16),
+    ?assertMatch({reply, ok, #state{}}, RR16),
     ?assertMatch([
         #backend_info{partition = 42, start_timestamp = 4, end_timestamp = 5, backend_state = undefined, ref_count = 0}
     ],
-        lists:keysort(#backend_info.start_timestamp, ets:tab2list(R#state.backends_table))).
-
-
-z_teardown_test() ->
+        lists:keysort(#backend_info.start_timestamp, ets:tab2list(R#state.backends_table))),
     meck:unload().
 
 -endif.
