@@ -101,23 +101,6 @@ handle_call({drop_partition, Partition}, _From, State = #state{backends_table = 
         0, Backends),
     {reply, ok, State#state{current_loaded_backends = CurrLoaded - TotalStopped}}.
 
-list_backend_keys(Partition, #state{backends_table = Tab}) ->
-    Spec = [{
-        #backend_info{_ = '_', partition = '$2', start_timestamp = '$3', end_timestamp = '$4'},
-        [{'=:=', '$2', Partition}],
-        [{{'$3', '$4'}}]
-    }],
-    ets:select(Tab, Spec).
-
-list_active_backends_refs(Partition, #state{backends_table = Tab}) ->
-    Spec = [{
-        #backend_info{_ = '_', backend_state = '$1', partition = '$2', module = '$3'},
-        [{'=:=', '$2', Partition}, {'=/=', '$1', undefined}],
-        [{{'$1', '$3'}}]
-    }],
-    ets:select(Tab, Spec).
-
-
 handle_cast({release, Partition, {From, _To}, NewBackendRef}, State = #state{backends_table = Tab}) ->
     Key = {From, Partition},
     I = ets:lookup(Tab, Key),
@@ -154,6 +137,22 @@ code_change(_OldVsn, State, _Extra) ->
     {ok, State}.
 
 %% PRIVATE FUNCTIONS
+
+list_backend_keys(Partition, #state{backends_table = Tab}) ->
+    Spec = [{
+        #backend_info{_ = '_', partition = '$2', start_timestamp = '$3', end_timestamp = '$4'},
+        [{'=:=', '$2', Partition}],
+        [{{'$3', '$4'}}]
+    }],
+    ets:select(Tab, Spec).
+
+list_active_backends_refs(Partition, #state{backends_table = Tab}) ->
+    Spec = [{
+        #backend_info{_ = '_', backend_state = '$1', partition = '$2', module = '$3'},
+        [{'=:=', '$2', Partition}, {'=/=', '$1', undefined}],
+        [{{'$1', '$3'}}]
+    }],
+    ets:select(Tab, Spec).
 
 load_waiting_backends(State = #state{wait_queue = WaitQueue}) ->
     {UpdState, UpdWaitQueue} = lists:foldl(
