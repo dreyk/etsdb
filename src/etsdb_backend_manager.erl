@@ -115,13 +115,13 @@ handle_cast({release, Partition, {From, _To}, NewBackendRef}, State = #state{bac
           end,
     ets:update_element(Tab, Key, Upd),
     NewState = if
-                   NewCnt == 0 ->
-                       load_waiting_backends(State);
                    NewBackendRef == 'delete_backend' ->
                        ets:delete(Tab, Key),
                        CurrLoaded = State#state.current_loaded_backends,
                        UpdState = State#state{current_loaded_backends = CurrLoaded - 1},
                        load_waiting_backends(UpdState);
+                   NewCnt == 0 ->
+                       load_waiting_backends(State);
                    true ->
                        State
                end,
