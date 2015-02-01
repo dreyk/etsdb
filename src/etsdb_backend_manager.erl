@@ -104,28 +104,32 @@ handle_call({drop_partition, Partition}, _From, State = #state{backends_table = 
 handle_cast({release, Partition, {From, _To}, NewBackendRef}, State = #state{backends_table = Tab}) ->
     Key = {From, Partition},
     I = ets:lookup(Tab, Key),
-    [#backend_info{ref_count = Cnt}] = I,
-    NewCnt = Cnt - 1,
-    Upd0 = [{#backend_info.ref_count, NewCnt}],
-    Upd = if
-              NewBackendRef =/= undefined ->
-                  [{#backend_info.backend_state, NewBackendRef} | Upd0];
-              true ->
-                  Upd0
-          end,
-    ets:update_element(Tab, Key, Upd),
-    NewState = if
-                   NewBackendRef == 'delete_backend' ->
-                       ets:delete(Tab, Key),
-                       CurrLoaded = State#state.current_loaded_backends,
-                       UpdState = State#state{current_loaded_backends = CurrLoaded - 1},
-                       load_waiting_backends(UpdState);
-                   NewCnt == 0 ->
-                       load_waiting_backends(State);
-                   true ->
-                       State
-               end,
-    {noreply, NewState}.
+    case I of
+        [#backend_info{ref_count = Cnt}] ->
+            NewCnt = Cnt - 1,
+            Upd0 = [{#backend_info.ref_count, NewCnt}],
+            Upd = if
+                      NewBackendRef =/= undefined ->
+                          [{#backend_info.backend_state, NewBackendRef} | Upd0];
+                      true ->
+                          Upd0
+                  end,
+            ets:update_element(Tab, Key, Upd),
+            NewState = if
+                           NewBackendRef == 'delete_backend' ->
+                               ets:delete(Tab, Key),
+                               CurrLoaded = State#state.current_loaded_backends,
+                               UpdState = State#state{current_loaded_backends = CurrLoaded - 1},
+                               load_waiting_backends(UpdState);
+                           NewCnt == 0 ->
+                               load_waiting_backends(State);
+                           true ->
+                               State
+                       end,
+            {noreply, NewState};
+        [] ->
+            {noreply, State}
+    end.
     
 handle_info(_Info, _State) ->
     erlang:error(not_implemented).
