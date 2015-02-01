@@ -348,6 +348,32 @@ save_test_() ->
         end
     ].
 
+find_expired_test_() ->
+    Config = [{proxy_source, [proxy_test_backend, deeper_backend]}, {data_root, "/home/admin/data"},
+        {max_loaded_backends, 3}, {rotation_interval, {1,s}}, {exparation_time, {1, s}}],
+    etsdb_backend_manager:start_link(Config),
+    mock_read_sequence(),
+    meck:new(etsdb_util, [strict, passthrough]),
+    meck:expect(proxy_test_backend, drop, fun(init) -> {ok, destoyed} end),
+    [
+        fun() ->
+            {ok, R} = init(112, Config),
+            meck:expect(etsdb_util, system_time, fun(sec) -> 4 end),
+            Expired = find_expired(proxy_test_bucket, R),
+            ?assertEqual({expired_records, {2, [{expired_interval,{0,1}},{expired_interval,{1,2}}]}},
+                Expired),
+            RR1 = delete(proxy_test_bucket, [{expired_interval,{0,1}},{expired_interval,{1,2}}], R),
+            ?assertMatch({ok, _}, RR1),
+            ?assertEqual([{2,3},{3,4},{4,5}], etsdb_backend_manager:list_backends(112))
+        end,
+        fun() ->
+            {ok, R} = init(112, Config),
+            meck:expect(etsdb_util, system_time, fun(sec) -> 5 end),
+            ?assertEqual({expired_records, {3, [{expired_interval,{0,1}},{expired_interval,{1,2}}, {expired_interval,{2,3}}]}},
+                find_expired(proxy_test_bucket, R))
+        end
+    ].
+
 
 %% MOCKS
 
