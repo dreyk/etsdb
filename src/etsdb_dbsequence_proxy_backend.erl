@@ -374,6 +374,32 @@ find_expired_test_() ->
         end
     ].
 
+drop_test_() ->
+    Config = [{proxy_source, [proxy_test_backend, deeper_backend]}, {data_root, "/home/admin/data"},
+        {max_loaded_backends, 3}, {rotation_interval, {1,s}}, {exparation_time, {1, s}}],
+    etsdb_backend_manager:start_link(Config),
+    mock_read_sequence(),
+    catch meck:new(etsdb_dbsequence_proxy_fileaccess, [strict]),
+    [
+        fun() ->
+            meck:expect(etsdb_dbsequence_proxy_fileaccess, remove_root_path, fun("/home/admin/data") -> true end),
+            {ok, R} = init(112, Config),
+            {ok, Ref} = etsdb_backend_manager:acquire(112, {0,1}),
+            RR1 = drop(R),
+            ?assertMatch({ok, #state{}}, RR1),
+            ?assertEqual([], etsdb_backend_manager:list_backends(112)),
+            ?assertEqual(ok, etsdb_backend_manager:release(112, {0, 1}, Ref))
+        end,
+
+        fun() ->
+            meck:expect(etsdb_dbsequence_proxy_fileaccess, remove_root_path, fun("/home/admin/data") -> {error, fail} end),
+            {ok, R} = init(112, Config),
+            RR1 = drop(R),
+            ?assertMatch({error, fail, #state{}}, RR1)
+        end
+    ].
+
+
 
 %% MOCKS
 
