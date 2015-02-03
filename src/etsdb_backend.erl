@@ -32,6 +32,9 @@
 -type scan_result()::{async, fold_function()}.
 -type fold_objects_function() :: fun((key(), value(), acc()) -> acc()).
 
+-export_type([partition/0, config/0, state/0, state_or_error/0, bucket/0, kv_list/0, expired_records/0, scan_query/0, 
+    fold_function/0, scan_result/0, fold_objects_function/0]).
+
 -callback init(Partition :: partition(), Config :: config()) -> {ok, state()} | {error, Reason :: term()}.
 -callback stop(State :: state()) -> ok.
 
