@@ -263,8 +263,7 @@ init_test() ->
     ?assertMatch({ok, #state{current_loaded_backends = 0, max_loaded_backends = 3, wait_queue = []}}, R).
 
 load_backend_test() ->
-    meck:unload(proxy_test_backend),
-    meck:new(proxy_test_backend, [non_strict]),
+    catch meck:new(proxy_test_backend, [non_strict]),
     meck:expect(proxy_test_backend, init,
         fun(Partition, Config) ->
             ?assertEqual(112, Partition),
@@ -495,7 +494,7 @@ load_backend_test() ->
         #backend_info{partition = 42, start_timestamp = 4, end_timestamp = 5, backend_state = undefined, ref_count = 0}
     ],
         lists:keysort(#backend_info.start_timestamp, ets:tab2list(R#state.backends_table))),
-    meck:unload().
+    catch meck:unload().
 
 -endif.
 
