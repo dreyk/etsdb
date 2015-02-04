@@ -116,25 +116,27 @@ scan(Bucket,From,To,Acc,#state{partition = Partition, source_module = Mod, rotat
     {async, Resp}.
 
 fold_objects(FoldObjectsFun, Acc, #state{partition = Partition, source_module = Mod}) ->
-    try
-        Resp = lists:foldl(
-            fun(Key, Data) ->
-                case acquire(Partition, Key) of
-                    {ok, Ref} ->
-                        R = Mod:fold_objects(FoldObjectsFun, Data, Ref),
-                        etsdb_backend_manager:release(Partition, Key, undefined),
-                        R;
-                    {error, Reason} ->
-                        etsdb_backend_manager:release(Partition, Key, undefined),
-                        throw({fold_failed, Key, Reason})
-                end
-            end,
-            Acc, etsdb_backend_manager:list_backends(Partition)),
-        {ok, Resp}
-    catch
-        {fold_failed, Key, Reason} ->
-            {error, fold_failed, Partition, Key, Reason}
-    end.
+    Resp = fun() ->
+        try
+            ScanRes = lists:foldl(
+                fun(Key, Data) ->
+                    case acquire(Partition, Key) of
+                        {ok, Ref} ->
+                            {async, Fun} = Mod:fold_objects(FoldObjectsFun, Data, Ref),
+                            process_scan_result(Fun, Partition, Key);
+                        {error, Reason} ->
+                            etsdb_backend_manager:release(Partition, Key, undefined),
+                            throw({scan_failed, Key, Reason})
+                    end
+                end,
+                Acc, etsdb_backend_manager:list_backends(Partition)),
+            {ok, ScanRes}
+        catch
+            {scan_failed, Key, Reason} ->
+                {error, {fold_failed, Partition, Key, Reason}}
+        end
+    end,
+    {async, Resp}.
 
 find_expired(_Bucket, #state{partition = Partition, config = Config, rotation_interval = ExchangeInterval}) ->
     ExparartionTime = etsdb_pretty_time:to_sec(etsdb_util:propfind(exparation_time, Config, {24, h})),
@@ -514,8 +516,45 @@ calc_scan_intervals_test_() ->
         ?_assertEqual([{200, 300}, {300, 400}, {400, 500}], calc_scan_intervals(200, 401, 100)),
         ?_assertEqual([{100, 200}, {200, 300}, {300, 400}, {400, 500}], calc_scan_intervals(185, 420, 100))
     ].
-    
-    
+
+fold_test_() ->
+    Config = [{proxy_source, [proxy_test_backend, deeper_backend]}, {data_root, "/home/admin/data"},
+        {max_loaded_backends, 3}, {rotation_interval, {1,s}}, {exparation_time, {1, s}}],
+    etsdb_backend_manager:start_link(Config),
+    mock_read_sequence(),
+    catch meck:new(proxy_test_backend, [non_strict]),
+    [
+        fun() ->
+            meck:expect(proxy_test_backend, fold_objects,
+                fun(Fun, Acc, init) ->
+                    {async, fun() -> {ok, Fun(k, 1, Acc)} end}
+                end),
+            {ok, R} = init(112, Config),
+            RR1 = fold_objects(fun(K, V, Acc) -> [{K, V}|Acc]end, [], R),
+            ?assertMatch({async, _}, RR1),
+            {async, Fun} = RR1,
+            ?assert(is_function(Fun, 0)),
+            RR2 = Fun(),
+            ?assertEqual({ok, [{k,1},{k,1},{k,1},{k,1},{k,1}]}, RR2)
+        end,
+
+        fun() ->
+            meck:expect(proxy_test_backend, fold_objects,
+                fun(_Fun, _Acc, init) ->
+                    {async, fun() -> {error, uuuh} end}
+                end),
+            {ok, R} = init(112, Config),
+            RR1 = fold_objects(fun(K, V, Acc) -> [{K, V}|Acc]end, [], R),
+            ?assertMatch({async, _}, RR1),
+            {async, Fun} = RR1,
+            ?assert(is_function(Fun, 0)),
+            RR2 = Fun(),
+            ?assertMatch({error, _}, RR2),
+            {error, Reason} = RR2,
+            ?assertEqual({fold_failed, 112, {0,1}, uuuh}, Reason)
+        end
+    ].
+
 
 %% MOCKS
 
