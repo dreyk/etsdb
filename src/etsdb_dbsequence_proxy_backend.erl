@@ -69,25 +69,35 @@ save(Bucket, KvList, State = #state{rotation_interval = RotationInterval}) ->
     end.
 
 scan(Query, Acc, #state{partition = Partition, source_module = Mod}) ->
-    try
-        Resp = lists:foldl(
-            fun(Key, Data) ->
-                case acquire(Partition, Key) of
-                    {ok, Ref} ->
-                        R = Mod:scan(Query, Data, Ref),
-                        etsdb_backend_manager:release(Partition, Key, undefined),
-                        R;
-                    {error, Reason} ->
-                        etsdb_backend_manager:release(Partition, Key, undefined),
-                        throw({scan_failed, Key, Reason})
-                end
-            end, 
-            Acc, etsdb_backend_manager:list_backends(Partition)),
-        {ok, Resp}
-    catch
-        {scan_failed, Key, Reason} ->
-            {error, scan_failed, Partition, Key, Reason}
-    end.
+    Resp = fun() ->
+        try
+            ScanRes = lists:foldl(
+                fun(Key, Data) ->
+                    case acquire(Partition, Key) of
+                        {ok, Ref} ->
+                            {async, Fun} = Mod:scan(Query, Data, Ref),
+                            case Fun() of
+                                {ok, CurrAcc} ->
+                                    etsdb_backend_manager:release(Partition, Key, undefined),
+                                    CurrAcc;
+                                {error, Reason} ->
+                                    etsdb_backend_manager:release(Partition, Key, undefined),
+                                    throw({scan_failed, Key, Reason})
+                            end;
+                        {error, Reason} ->
+                            etsdb_backend_manager:release(Partition, Key, undefined),
+                            throw({scan_failed, Key, Reason})
+                    end
+                end, 
+                Acc, etsdb_backend_manager:list_backends(Partition)),
+            {ok, ScanRes}
+        catch
+            {scan_failed, Key, Reason} ->
+                {error, {scan_failed, Partition, Key, Reason}}
+        end
+    end,
+    {async, Resp}.
+
 
 
 scan(Bucket,From,To,Acc,#state{partition = Partition, source_module = Mod, rotation_interval = ExchangeInterval}) ->
@@ -399,7 +409,56 @@ drop_test_() ->
         end
     ].
 
+-include("etsdb_request.hrl").
 
+scan_req_test_() ->
+    Config = [{proxy_source, [proxy_test_backend, deeper_backend]}, {data_root, "/home/admin/data"},
+        {max_loaded_backends, 3}, {rotation_interval, {1,s}}, {exparation_time, {1, s}}],
+    etsdb_backend_manager:start_link(Config),
+    mock_read_sequence(),
+    Req = [#pscan_req{}],
+    catch meck:new(proxy_test_backend, [non_strict]),
+    [
+        fun() -> 
+            meck:expect(proxy_test_backend, scan,
+                fun
+                    (R, [ ], init) when R == Req -> {async, fun() -> {ok, [1]} end};
+                    (R, [1], init) when R == Req -> {async, fun() -> {ok, [2]} end};
+                    (R, [2], init) when R == Req -> {async, fun() -> {ok, [3]} end};
+                    (R, [3], init) when R == Req -> {async, fun() -> {ok, [4]} end};
+                    (R, [4], init) when R == Req -> {async, fun() -> {ok, [5]} end}
+                end),
+            {ok, R} = init(112, Config),
+            RR1 = scan(Req, [], R),
+            ?assertMatch({async, _}, RR1),
+            {async, Fun} = RR1,
+            ?assert(is_function(Fun, 0)),
+            RR2 = Fun(),
+            ?assertEqual({ok, [5]}, RR2)
+        end,
+        
+        fun() ->
+            meck:expect(proxy_test_backend, scan,
+                fun
+                    (R, [ ], init) when R == Req -> {async, fun() -> {ok, [1]} end};
+                    (R, [1], init) when R == Req -> {async, fun() -> {ok, [2]} end};
+                    (R, [2], init) when R == Req -> {async, fun() -> {error, failed} end};
+                    (R, [3], init) when R == Req -> {async, fun() -> {ok, [4]} end};
+                    (R, [4], init) when R == Req -> {async, fun() -> {ok, [5]} end}
+                end),
+            {ok, R} = init(112, Config),
+            RR1 = scan(Req, [], R),
+            ?assertMatch({async, _}, RR1),
+            {async, Fun} = RR1,
+            ?assert(is_function(Fun, 0)),
+            RR2 = Fun(),
+            ?assertMatch({error, _}, RR2),
+            {error, Reason} = RR2,
+            ?assertEqual({scan_failed, 112, {2,3}, failed}, Reason)
+        end
+    ].
+    
+    
 
 %% MOCKS
 
