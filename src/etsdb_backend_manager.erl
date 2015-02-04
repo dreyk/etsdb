@@ -34,7 +34,8 @@
     last_accessed = undefined,
     ref_count = 0,
     opts :: proplists:proplist(),
-    module :: module()
+    module :: module(),
+    owners :: sets:set(pid())
 }).
 -record(state, {
     backends_table,
@@ -63,7 +64,8 @@ acquire(Partition, Key) ->
 
 -spec release(term(), backend_key(), term()) -> ok.
 release(Partition, Key, NewState) ->
-    gen_server:cast(?MODULE, {release, Partition, Key, NewState}),
+    Caller = self(),
+    gen_server:cast(?MODULE, {release, Partition, Key, NewState, Caller}),
     ok.
 
 -spec list_backends(term()) -> {ok, Backends :: backend_description()} | {error, Reason :: term()}.
@@ -86,7 +88,7 @@ init(Config)->
 handle_call({add, BackendInfo}, _From, State = #state{backends_table = Tab}) ->
     Created = ets:insert_new(Tab, BackendInfo),
     {reply, Created, State};
-handle_call({acquire, Partition, Key}, From, State) ->
+handle_call({acquire, Partition, Key}, {From, _Tag}, State) ->
     process_acquire_results(load_backend(Partition, Key, State, From));
 handle_call({list_backends, Partition}, _Form, State) ->
     {reply, list_backend_keys(Partition, State), State};
@@ -102,13 +104,13 @@ handle_call({drop_partition, Partition}, _From, State = #state{backends_table = 
         0, Backends),
     {reply, ok, State#state{current_loaded_backends = CurrLoaded - TotalStopped}}.
 
-handle_cast({release, Partition, {From, _To}, NewBackendRef}, State = #state{backends_table = Tab}) ->
+handle_cast({release, Partition, {From, _To}, NewBackendRef, Caller}, State = #state{backends_table = Tab}) ->
     Key = {From, Partition},
     I = ets:lookup(Tab, Key),
     case I of
-        [#backend_info{ref_count = Cnt}] ->
+        [#backend_info{ref_count = Cnt, owners = Owners}] ->
             NewCnt = Cnt - 1,
-            Upd0 = [{#backend_info.ref_count, NewCnt}],
+            Upd0 = [{#backend_info.ref_count, NewCnt}, {#backend_info.owners, sets:del_element(Caller, Owners)}],
             Upd = if
                       NewBackendRef =/= undefined ->
                           [{#backend_info.backend_state, NewBackendRef} | Upd0];
@@ -132,8 +134,29 @@ handle_cast({release, Partition, {From, _To}, NewBackendRef}, State = #state{bac
             {noreply, State}
     end.
     
-handle_info(_Info, _State) ->
-    erlang:error(not_implemented).
+handle_info({'DOWN', _MonitorRef, process, Pid, _Info}, State = #state{backends_table = Tab, wait_queue = WaitQueue}) ->
+    Result = ets:foldl(
+        fun(#backend_info{owners = Owners, key = Key, ref_count = RefCnt}, Result) ->
+            case sets:is_element(Pid, Owners) of
+                true ->
+                    ets:update_element(Tab, Key, [
+                        {#backend_info.owners, sets:del_element(Pid, Owners)},
+                        {#backend_info.ref_count, RefCnt - 1}
+                        ]),
+                    lager:warning("Process ~p terminated while having backend ~p acquired", [Pid, Key]),
+                    true;
+                false ->
+                    Result
+            end
+        end, false, Tab),
+    NewWaitQueue = lists:filter(fun({_Key, _Ref, ReqPid}) -> ReqPid /= Pid end, WaitQueue),
+    NewState = if
+        Result ->
+            load_waiting_backends(State#state{wait_queue = NewWaitQueue});
+        true ->
+            State
+    end,
+    {noreply, NewState}.
 
 terminate(_Reason, _State) ->
     ok.
@@ -189,7 +212,8 @@ load_backend(Partition, {From, _To}, State = #state{backends_table = Tab}, Pid) 
 
 load_existing_backend(I, Key, Partition, State = #state{backends_table = Tab, current_loaded_backends = CurrLoaded,
     max_loaded_backends = MaxLoaded, wait_queue = WaitQueue}, Pid) ->
-    #backend_info{backend_state = BackendState, path = Path, opts = Config, module = Mod, ref_count = RefCnt} = I,
+    #backend_info{backend_state = BackendState, path = Path, opts = Config, module = Mod, ref_count = RefCnt, owners = Owners} = I,
+    erlang:monitor(process, Pid),
     if
         BackendState == undefined ->
             SupersedeRes = if
@@ -203,7 +227,8 @@ load_existing_backend(I, Key, Partition, State = #state{backends_table = Tab, cu
                     BackendConfig = lists:keyreplace(data_root, 1, Config, {data_root, Path}),
                     case Mod:init(Partition, BackendConfig) of
                         {ok, LoadedRef} ->
-                            Loaded = I#backend_info{backend_state = LoadedRef, last_accessed = erlang:now(), ref_count = 1},
+                            Loaded = I#backend_info{backend_state = LoadedRef, last_accessed = erlang:now(),
+                                ref_count = 1, owners = sets:from_list([Pid])},
                             ets:insert(Tab, Loaded),
                             {ok, LoadedRef, State#state{current_loaded_backends = NewLoadedCnt + 1}};
                         {error, Reason} ->
@@ -220,7 +245,11 @@ load_existing_backend(I, Key, Partition, State = #state{backends_table = Tab, cu
             end;
         true ->
             Ts = erlang:now(),
-            ets:update_element(Tab, Key, [{#backend_info.last_accessed, Ts}, {#backend_info.ref_count, RefCnt + 1}]),
+            ets:update_element(Tab, Key, [
+                {#backend_info.last_accessed, Ts},
+                {#backend_info.ref_count, RefCnt + 1},
+                {#backend_info.owners, sets:add_element(Pid, Owners)}
+            ]),
             {ok, BackendState, State}
     end.
 
@@ -366,13 +395,13 @@ load_backend_test() ->
         lists:keysort(#backend_info.start_timestamp, ets:tab2list(R#state.backends_table))),
     ?assertEqual([{{1, 112}, Ref1, self()}], R6#state.wait_queue),
     receive 
-        _ ->
+        {_, _, _} ->
             ?assert(false)
     after 0 ->
         ok
     end,
     
-    RR7 = handle_cast({release, 112, {0, 1}, updated}, R6),
+    RR7 = handle_cast({release, 112, {0, 1}, updated, self()}, R6),
     ?assertMatch({noreply, _}, RR7),
     {_, R7} = RR7,
     ?assertMatch([
@@ -385,13 +414,13 @@ load_backend_test() ->
         lists:keysort(#backend_info.start_timestamp, ets:tab2list(R#state.backends_table))),
     ?assertEqual([{{1, 112}, Ref1, self()}], R7#state.wait_queue),
     receive
-        _ ->
+        {_, _, _} ->
             ?assert(false)
     after 0 ->
         ok
     end,
 
-    RR8 = handle_cast({release, 112, {3, 4}, undefined}, R7),
+    RR8 = handle_cast({release, 112, {3, 4}, undefined, self()}, R7),
     ?assertMatch({noreply, _}, RR8),
     {_, R8} = RR8,
     ?assertMatch([
@@ -404,13 +433,13 @@ load_backend_test() ->
         lists:keysort(#backend_info.start_timestamp, ets:tab2list(R#state.backends_table))),
     ?assertEqual([{{1, 112}, Ref1, self()}], R8#state.wait_queue),
     receive
-        _ ->
+        {_, _, _} ->
             ?assert(false)
     after 0 ->
         ok
     end,
 
-    RR9 = handle_cast({release, 112, {3, 4}, lala}, R8),
+    RR9 = handle_cast({release, 112, {3, 4}, lala, self()}, R8),
     ?assertMatch({noreply, _}, RR9),
     {_, R9} = RR9,
     ?assertMatch([
@@ -423,7 +452,7 @@ load_backend_test() ->
         lists:keysort(#backend_info.start_timestamp, ets:tab2list(R#state.backends_table))),
     ?assertEqual([], R9#state.wait_queue),
     receive
-        V ->
+        {_, _, _} = V ->
             ?assertEqual({Ref1, ok, init}, V)
     after 0 ->
         ?assert(false)
@@ -448,7 +477,7 @@ load_backend_test() ->
         lists:keysort(#backend_info.start_timestamp, ets:tab2list(R#state.backends_table))),
     ?assertEqual([{{4, 112}, Ref2, self()},{{3, 112}, Ref3, self()},{{4, 112}, Ref4, self()}], R12#state.wait_queue),
     
-    RR13 = handle_cast({release, 112, {0, 1}, updated11}, R12),
+    RR13 = handle_cast({release, 112, {0, 1}, updated11, self()}, R12),
     ?assertMatch({noreply, _}, RR13),
     {_, R13} = RR13,
     ?assertMatch([
@@ -465,7 +494,7 @@ load_backend_test() ->
     
     meck:expect(proxy_test_backend, init, fun(_,_) -> {error, failed} end),
 
-    RR14 = handle_cast({release, 112, {1, 2}, 'RULE 34'}, R13),
+    RR14 = handle_cast({release, 112, {1, 2}, 'RULE 34', self()}, R13),
     ?assertMatch({noreply, _}, RR14),
     {_, R14} = RR14,
     ?assertMatch([
