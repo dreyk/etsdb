@@ -40,7 +40,8 @@
     backends_table,
     max_loaded_backends::pos_integer(),
     current_loaded_backends = 0::non_neg_integer(),
-    wait_queue = [] :: [{Key ::{From :: non_neg_integer(), Partition :: non_neg_integer()}, Ref :: term(), RequesterPid :: pid()}]
+    wait_queue = [] :: [{Key ::{From :: non_neg_integer(), Partition :: non_neg_integer()}, Ref :: term(), RequesterPid :: pid()}],
+    monitors = [] :: [{Ref::reference(), Key::{From :: non_neg_integer(), Partition :: non_neg_integer()}}]
 }).
 
 
