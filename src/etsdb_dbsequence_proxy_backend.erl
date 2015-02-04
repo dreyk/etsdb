@@ -76,14 +76,7 @@ scan(Query, Acc, #state{partition = Partition, source_module = Mod}) ->
                     case acquire(Partition, Key) of
                         {ok, Ref} ->
                             {async, Fun} = Mod:scan(Query, Data, Ref),
-                            case Fun() of
-                                {ok, CurrAcc} ->
-                                    etsdb_backend_manager:release(Partition, Key, undefined),
-                                    CurrAcc;
-                                {error, Reason} ->
-                                    etsdb_backend_manager:release(Partition, Key, undefined),
-                                    throw({scan_failed, Key, Reason})
-                            end;
+                            process_scan_result(Fun, Partition, Key);
                         {error, Reason} ->
                             etsdb_backend_manager:release(Partition, Key, undefined),
                             throw({scan_failed, Key, Reason})
@@ -98,29 +91,29 @@ scan(Query, Acc, #state{partition = Partition, source_module = Mod}) ->
     end,
     {async, Resp}.
 
-
-
 scan(Bucket,From,To,Acc,#state{partition = Partition, source_module = Mod, rotation_interval = ExchangeInterval}) ->
     Intervals = calc_scan_intervals(From, To, ExchangeInterval),
-    try
-        Resp = lists:foldl(
-            fun(Key, Data) ->
-                case acquire(Partition, Key) of
-                    {ok, Ref} ->
-                        R = Mod:scan(Bucket, From, To, Data, Ref),
-                        etsdb_backend_manager:release(Partition, Key, undefined),
-                        R;
-                    {error, Reason} ->
-                        etsdb_backend_manager:release(Partition, Key, undefined),
-                        throw({scan_failed, Key, Reason})
-                end
-            end,
-            Acc, Intervals),
-        {ok, Resp}
-    catch
-        {scan_failed, Key, Reason} ->
-            {error, scan_failed, Partition, Key, Reason}
-    end.
+    Resp = fun() ->
+        try
+            ScanRes = lists:foldl(
+                fun(Key, Data) ->
+                    case acquire(Partition, Key) of
+                        {ok, Ref} ->
+                            {async, Fun} = Mod:scan(Bucket, From, To, Data, Ref),
+                            process_scan_result(Fun, Partition, Key);
+                        {error, Reason} ->
+                            etsdb_backend_manager:release(Partition, Key, undefined),
+                            throw({scan_failed, Key, Reason})
+                    end
+                end,
+                Acc, Intervals),
+            {ok, ScanRes}
+        catch
+            {scan_failed, Key, Reason} ->
+                {error, {scan_failed, Partition, Key, Reason}}
+        end
+    end,
+    {async, Resp}.
 
 fold_objects(FoldObjectsFun, Acc, #state{partition = Partition, source_module = Mod}) ->
     try
@@ -195,6 +188,16 @@ is_empty(#state{source_module = Mod, partition = Partition}) ->
 
 %% PRIVATE
 
+process_scan_result(Fun, Partition, Key) ->
+    case Fun() of
+        {ok, CurrAcc} ->
+            etsdb_backend_manager:release(Partition, Key, undefined),
+            CurrAcc;
+        {error, Reason} ->
+            etsdb_backend_manager:release(Partition, Key, undefined),
+            throw({scan_failed, Key, Reason})
+    end.
+
 mk_path(Config, {Start, End}) ->
     DataRoot = etsdb_util:propfind(data_root, Config, "./data"),
     BackendFileName = io_lib:format("~20..0B-~20..0B", [Start, End]),
@@ -202,8 +205,14 @@ mk_path(Config, {Start, End}) ->
 
 calc_scan_intervals(From, To, ExchangeInterval) ->
     First = From - (From rem ExchangeInterval),
-    Last = To - (To rem ExchangeInterval) + ExchangeInterval,
-    lists:seq(First, Last, ExchangeInterval).
+    ToRem = To rem ExchangeInterval,
+    Last = if 
+               ToRem /= 0 ->
+                   To - ToRem;
+               ToRem == 0 ->
+                   To - ExchangeInterval
+           end,
+    [{X, X + ExchangeInterval} || X <- lists:seq(First, Last, ExchangeInterval)].
 
 init_sequence(Partition, Config, SrcModule) ->
     DataRoot = etsdb_util:propfind(data_root, Config, "./data"),
@@ -456,6 +465,54 @@ scan_req_test_() ->
             {error, Reason} = RR2,
             ?assertEqual({scan_failed, 112, {2,3}, failed}, Reason)
         end
+    ].
+
+scan_simple_test_() ->
+    Config = [{proxy_source, [proxy_test_backend, deeper_backend]}, {data_root, "/home/admin/data"},
+        {max_loaded_backends, 3}, {rotation_interval, {1,s}}, {exparation_time, {1, s}}],
+    etsdb_backend_manager:start_link(Config),
+    mock_read_sequence(),
+    catch meck:new(proxy_test_backend, [non_strict]),
+    [
+        fun() ->
+            meck:expect(proxy_test_backend, scan,
+                fun(proxy_test_bucket, 2, 4, L, init) ->
+                        {async, fun() -> {ok, [1 | L]} end}
+                end),
+            {ok, R} = init(112, Config),
+            RR1 = scan(proxy_test_bucket, 2, 4, [], R),
+            ?assertMatch({async, _}, RR1),
+            {async, Fun} = RR1,
+            ?assert(is_function(Fun, 0)),
+            RR2 = Fun(),
+            ?assertEqual({ok, [1,1]}, RR2)
+        end,
+        
+        fun() ->
+            meck:expect(proxy_test_backend, scan,
+                fun(proxy_test_bucket, 2, 4, _L, init) ->
+                    {async, fun() -> {error, beadabeda} end}
+                end),
+            {ok, R} = init(112, Config),
+            RR1 = scan(proxy_test_bucket, 2, 4, [], R),
+            ?assertMatch({async, _}, RR1),
+            {async, Fun} = RR1,
+            ?assert(is_function(Fun, 0)),
+            RR2 = Fun(),
+            ?assertMatch({error, _}, RR2),
+            {error, Reason} = RR2,
+            ?assertEqual({scan_failed, 112, {2,3}, beadabeda}, Reason)
+        end
+    ].
+
+calc_scan_intervals_test_() ->
+    [
+        ?_assertEqual([{200, 300}, {300, 400}], calc_scan_intervals(200, 400, 100)),
+        ?_assertEqual([{100, 200}, {200, 300}, {300, 400}], calc_scan_intervals(185, 400, 100)),
+        ?_assertEqual([{200, 300}, {300, 400}], calc_scan_intervals(213, 400, 100)),
+        ?_assertEqual([{200, 300}, {300, 400}], calc_scan_intervals(200, 386, 100)),
+        ?_assertEqual([{200, 300}, {300, 400}, {400, 500}], calc_scan_intervals(200, 401, 100)),
+        ?_assertEqual([{100, 200}, {200, 300}, {300, 400}, {400, 500}], calc_scan_intervals(185, 420, 100))
     ].
     
     
