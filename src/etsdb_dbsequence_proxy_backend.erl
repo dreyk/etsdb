@@ -154,7 +154,7 @@ delete(_Bucket, Data, #state{partition = Partition, source_module = Mod, config 
                     DropRes = case Mod:drop(Ref) of
                         {ok, NewRef} ->
                             ok = Mod:stop(NewRef),
-                            file:del_dir(mk_path(Config, Interval)),
+                            etsdb_dbsequence_proxy_fileaccess:remove_dir_recursively(mk_path(Config, Interval)),
                             Result;
                         {error, Reason, NewRef} ->
                             ok = Mod:stop(NewRef),
@@ -229,7 +229,7 @@ init_sequence(Partition, Config, SrcModule) ->
 
 drop_self(State = #state{config = Config}) ->
     DataRoot = etsdb_util:propfind(data_root, Config, "./data"),
-    case etsdb_dbsequence_proxy_fileaccess:remove_root_path(DataRoot) of
+    case etsdb_dbsequence_proxy_fileaccess:remove_dir_recursively(DataRoot) of
         true ->
             {ok, State};
         {error, Reason} ->
@@ -383,6 +383,13 @@ find_expired_test_() ->
             Expired = find_expired(proxy_test_bucket, R),
             ?assertEqual({expired_records, {2, [{expired_interval,{0,1}},{expired_interval,{1,2}}]}},
                 Expired),
+            
+            catch meck:new(etsdb_dbsequence_proxy_fileaccess, [strict]),
+            meck:expect(etsdb_dbsequence_proxy_fileaccess, remove_dir_recursively, 
+                [
+                    {["/home/admin/data/00000000000000000000-00000000000000000001"], true},
+                    {["/home/admin/data/00000000000000000001-00000000000000000002"], true}
+                ]),
             RR1 = delete(proxy_test_bucket, [{expired_interval,{0,1}},{expired_interval,{1,2}}], R),
             ?assertMatch({ok, _}, RR1),
             ?assertEqual([{2,3},{3,4},{4,5}], etsdb_backend_manager:list_backends(112))
@@ -403,7 +410,7 @@ drop_test_() ->
     catch meck:new(etsdb_dbsequence_proxy_fileaccess, [strict]),
     [
         fun() ->
-            meck:expect(etsdb_dbsequence_proxy_fileaccess, remove_root_path, fun("/home/admin/data") -> true end),
+            meck:expect(etsdb_dbsequence_proxy_fileaccess, remove_dir_recursively, fun("/home/admin/data") -> true end),
             {ok, R} = init(112, Config),
             {ok, Ref} = etsdb_backend_manager:acquire(112, {0,1}),
             RR1 = drop(R),
@@ -413,7 +420,7 @@ drop_test_() ->
         end,
 
         fun() ->
-            meck:expect(etsdb_dbsequence_proxy_fileaccess, remove_root_path, fun("/home/admin/data") -> {error, fail} end),
+            meck:expect(etsdb_dbsequence_proxy_fileaccess, remove_dir_recursively, fun("/home/admin/data") -> {error, fail} end),
             {ok, R} = init(112, Config),
             RR1 = drop(R),
             ?assertMatch({error, fail, #state{}}, RR1)
