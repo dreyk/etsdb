@@ -49,7 +49,7 @@
 
 -spec start_link(proplists:proplist()) -> {'ok', pid()} | 'ignore' | {'error', term()}.
 start_link(Config) ->
-    gen_server:start_link({local, ?MODULE}, ?MODULE, [Config], []).
+    gen_server:start_link({local, ?MODULE}, ?MODULE, Config, []).
 
 -spec add(term(), string(), non_neg_integer(), non_neg_integer(), proplists:proplist(), module()) -> ok.
 add(Partition, Path, From, To, Opts, Module) ->
@@ -235,6 +235,7 @@ load_existing_backend(I, Key, Partition, State = #state{backends_table = Tab, cu
                             Loaded = I#backend_info{backend_state = LoadedRef, last_accessed = erlang:now(),
                                 ref_count = 1, owners = dict:from_list([{Pid, MonitorRef}])},
                             ets:insert(Tab, Loaded),
+                            lager:info("Acquire ok. ~p backends laoded", [NewLoadedCnt + 1]),
                             {ok, LoadedRef, State#state{current_loaded_backends = NewLoadedCnt + 1}};
                         {error, Reason} ->
                             {error, {backend_load_failed, Reason}, State#state{current_loaded_backends = NewLoadedCnt}}
@@ -242,6 +243,7 @@ load_existing_backend(I, Key, Partition, State = #state{backends_table = Tab, cu
                 {not_available, LoadedCnt} when is_pid(Pid)  ->
                     Ref = make_ref(),
                     NewState = State#state{wait_queue = WaitQueue ++ [{Key, Ref, Pid}], current_loaded_backends = LoadedCnt},
+                    lager:info("Acquire busy. ~p backends loaded", [LoadedCnt]),
                     {busy, Ref, NewState};
                 {not_available, LoadedCnt} when not is_pid(Pid)  ->
                     {busy, undefined, State#state{current_loaded_backends = LoadedCnt}};

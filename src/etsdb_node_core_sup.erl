@@ -31,7 +31,7 @@ init([]) ->
     SupFlags = {RestartStrategy, MaxRestarts, MaxSecondsBetweenRestarts},
     
     BackendManagerConfig = app_helper:get_env(etsdb, backend_manager, []),
-    
+
     BackendManager = {
         etsdb_backend_manager,
         {etsdb_backend_manager, start_link, [BackendManagerConfig]},
