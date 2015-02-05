@@ -35,14 +35,13 @@
     ref_count = 0,
     opts :: proplists:proplist(),
     module :: module(),
-    owners :: sets:set(pid())
+    owners :: dict:dict(pid(), reference())
 }).
 -record(state, {
     backends_table,
     max_loaded_backends::pos_integer(),
     current_loaded_backends = 0::non_neg_integer(),
-    wait_queue = [] :: [{Key ::{From :: non_neg_integer(), Partition :: non_neg_integer()}, Ref :: term(), RequesterPid :: pid()}],
-    monitors = [] :: [{Ref::reference(), Key::{From :: non_neg_integer(), Partition :: non_neg_integer()}}]
+    wait_queue = [] :: [{Key ::{From :: non_neg_integer(), Partition :: non_neg_integer()}, Ref :: term(), RequesterPid :: pid()}]
 }).
 
 
@@ -110,7 +109,13 @@ handle_cast({release, Partition, {From, _To}, NewBackendRef, Caller}, State = #s
     case I of
         [#backend_info{ref_count = Cnt, owners = Owners}] ->
             NewCnt = Cnt - 1,
-            Upd0 = [{#backend_info.ref_count, NewCnt}, {#backend_info.owners, sets:del_element(Caller, Owners)}],
+            case dict:find(Caller, Owners) of
+                {ok, MonitorRef} ->
+                    erlang:demonitor(MonitorRef, [flush]);
+                error ->
+                    ok
+            end,
+            Upd0 = [{#backend_info.ref_count, NewCnt}, {#backend_info.owners, dict:erase(Caller, Owners)}],
             Upd = if
                       NewBackendRef =/= undefined ->
                           [{#backend_info.backend_state, NewBackendRef} | Upd0];
@@ -137,15 +142,15 @@ handle_cast({release, Partition, {From, _To}, NewBackendRef, Caller}, State = #s
 handle_info({'DOWN', _MonitorRef, process, Pid, _Info}, State = #state{backends_table = Tab, wait_queue = WaitQueue}) ->
     Result = ets:foldl(
         fun(#backend_info{owners = Owners, key = Key, ref_count = RefCnt}, Result) ->
-            case sets:is_element(Pid, Owners) of
-                true ->
+            case dict:find(Pid, Owners) of
+                {ok, _} ->
                     ets:update_element(Tab, Key, [
-                        {#backend_info.owners, sets:del_element(Pid, Owners)},
+                        {#backend_info.owners, dict:erase(Pid, Owners)},
                         {#backend_info.ref_count, RefCnt - 1}
                         ]),
                     lager:warning("Process ~p terminated while having backend ~p acquired", [Pid, Key]),
                     true;
-                false ->
+                error ->
                     Result
             end
         end, false, Tab),
@@ -213,7 +218,7 @@ load_backend(Partition, {From, _To}, State = #state{backends_table = Tab}, Pid) 
 load_existing_backend(I, Key, Partition, State = #state{backends_table = Tab, current_loaded_backends = CurrLoaded,
     max_loaded_backends = MaxLoaded, wait_queue = WaitQueue}, Pid) ->
     #backend_info{backend_state = BackendState, path = Path, opts = Config, module = Mod, ref_count = RefCnt, owners = Owners} = I,
-    erlang:monitor(process, Pid),
+    MonitorRef = erlang:monitor(process, Pid),
     if
         BackendState == undefined ->
             SupersedeRes = if
@@ -228,7 +233,7 @@ load_existing_backend(I, Key, Partition, State = #state{backends_table = Tab, cu
                     case Mod:init(Partition, BackendConfig) of
                         {ok, LoadedRef} ->
                             Loaded = I#backend_info{backend_state = LoadedRef, last_accessed = erlang:now(),
-                                ref_count = 1, owners = sets:from_list([Pid])},
+                                ref_count = 1, owners = dict:from_list([{Pid, MonitorRef}])},
                             ets:insert(Tab, Loaded),
                             {ok, LoadedRef, State#state{current_loaded_backends = NewLoadedCnt + 1}};
                         {error, Reason} ->
@@ -248,7 +253,7 @@ load_existing_backend(I, Key, Partition, State = #state{backends_table = Tab, cu
             ets:update_element(Tab, Key, [
                 {#backend_info.last_accessed, Ts},
                 {#backend_info.ref_count, RefCnt + 1},
-                {#backend_info.owners, sets:add_element(Pid, Owners)}
+                {#backend_info.owners, dict:store(Pid, MonitorRef, Owners)}
             ]),
             {ok, BackendState, State}
     end.
