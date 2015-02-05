@@ -16,6 +16,12 @@
 
 -spec read_sequence(file:filename()) -> [file:filename()].
 read_sequence(RootPath) ->
+    case filelib:ensure_dir(filename:join(RootPath, "sample")) of
+        ok ->
+            ok;
+        {error, Reason1} ->
+            error({failed_reading_sequnce, RootPath, Reason1})
+    end,
     case file:list_dir(RootPath) of
         {ok, Entries} ->
             [filename:join(RootPath, E) || E <- Entries];
