@@ -54,7 +54,7 @@ start_link(Config) ->
 -spec add(term(), string(), non_neg_integer(), non_neg_integer(), proplists:proplist(), module()) -> ok.
 add(Partition, Path, From, To, Opts, Module) ->
     gen_server:call(?MODULE, {add, mk_key(#backend_info{partition = Partition, path = Path,
-        start_timestamp = From, end_timestamp = To, opts = Opts, module = Module})}).
+        start_timestamp = From, end_timestamp = To, opts = Opts, module = Module, owners = dict:new()})}).
 
 -spec acquire(term(), backend_key()) ->
     {ok, BackendRef :: term()} | {busy, WaitObject :: term()} | {error, Reason :: term()}.
