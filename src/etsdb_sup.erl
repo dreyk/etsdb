@@ -35,21 +35,29 @@ start_link() ->
     supervisor:start_link({local, ?MODULE}, ?MODULE, []).
 
 init(_Args) ->
-    %%Start riak_core vnode master.See docimentation on riak_core.
-    VMaster = {etsdb_vnode_master,
-               {riak_core_vnode_master, start_link, [etsdb_vnode]},
-               permanent, 5000, worker, [riak_core_vnode_master]},
+    CoreSupervisor = {
+        etsdb_node_core_sup,
+        {etsdb_node_core_sup, start_link, []},
+        permanent, 5000, supervisor, [etsdb_vnode_put_proxy_sup]
+    },
+
     ClientWorkerPoolArgs = [{name, {local,etsdb_client_worker}},
                             {worker_module,etsdb_client_worker},
                             {size, 100},
                             {max_overflow,0}
                            ],
-    ClirntWorkerPool = {etsdb_client_worker, {poolboy, start_link, [ClientWorkerPoolArgs]},
-                        permanent, 5000, worker, [poolboy]},
-    ProxySupervisor = {etsdb_vnode_put_proxy_sup,
+    ClientWorkerPool = {
+        etsdb_client_worker, {poolboy, start_link, [ClientWorkerPoolArgs]},
+        permanent, 5000, worker, [poolboy]
+    },
+    
+    ProxySupervisor = {
+        etsdb_vnode_put_proxy_sup,
         {etsdb_vnode_put_proxy_sup, start_link, []},
-        permanent, 5000, supervisor, [etsdb_vnode_put_proxy_sup]},
-    All = [VMaster,ClirntWorkerPool,ProxySupervisor],
+        permanent, 5000, supervisor, [etsdb_vnode_put_proxy_sup]
+    },
+    
+    All = [CoreSupervisor, ClientWorkerPool, ProxySupervisor],
     { ok,
         { {one_for_one, 5, 10},
           All}}.
