@@ -139,12 +139,15 @@ fold_objects(FoldObjectsFun, Acc, #state{partition = Partition, source_module = 
     {async, Resp}.
 
 find_expired(_Bucket, #state{partition = Partition, config = Config, rotation_interval = ExchangeInterval}) ->
-    ExparartionTime = etsdb_pretty_time:to_sec(etsdb_util:propfind(expiration_time, Config, {24, h})),
-    ExpireBefore = etsdb_util:system_time(sec) - ExparartionTime,
-    ExpireIntervalsUpTo = ExpireBefore - (ExpireBefore rem ExchangeInterval),
-    Intervals = etsdb_backend_manager:list_backends(Partition),
-    ExpiredIntervals = [{expired_interval, I} || I = {_from, To} <- Intervals, To < ExpireIntervalsUpTo],
-    {expired_records, {length(ExpiredIntervals), ExpiredIntervals}}.
+    Resp = fun() ->
+        ExparartionTime = etsdb_pretty_time:to_sec(etsdb_util:propfind(expiration_time, Config, {24, h})),
+        ExpireBefore = etsdb_util:system_time(sec) - ExparartionTime,
+        ExpireIntervalsUpTo = ExpireBefore - (ExpireBefore rem ExchangeInterval),
+        Intervals = etsdb_backend_manager:list_backends(Partition),
+        ExpiredIntervals = [{expired_interval, I} || I = {_from, To} <- Intervals, To < ExpireIntervalsUpTo],
+        {expired_records, {length(ExpiredIntervals), ExpiredIntervals}}
+    end,
+    {async, Resp}.
 
 delete(_Bucket, Data, #state{partition = Partition, source_module = Mod, config = Config} = State) ->
     Res = lists:foldl(
@@ -380,7 +383,11 @@ find_expired_test_() ->
         fun() ->
             {ok, R} = init(112, Config),
             meck:expect(etsdb_util, system_time, fun(sec) -> 4 end),
-            Expired = find_expired(proxy_test_bucket, R),
+            ExpiredResp = find_expired(proxy_test_bucket, R),
+            ?assertMatch({async, _}, ExpiredResp),
+            {async, ExpiredFun} = ExpiredResp,
+            ?assert(is_function(ExpiredFun, 0)),
+            Expired = ExpiredFun(),
             ?assertEqual({expired_records, {2, [{expired_interval,{0,1}},{expired_interval,{1,2}}]}},
                 Expired),
             
@@ -397,8 +404,13 @@ find_expired_test_() ->
         fun() ->
             {ok, R} = init(112, Config),
             meck:expect(etsdb_util, system_time, fun(sec) -> 5 end),
+            ExpiredResp = find_expired(proxy_test_bucket, R),
+            ?assertMatch({async, _}, ExpiredResp),
+            {async, ExpiredFun} = ExpiredResp,
+            ?assert(is_function(ExpiredFun, 0)),
+            Expired = ExpiredFun(),
             ?assertEqual({expired_records, {3, [{expired_interval,{0,1}},{expired_interval,{1,2}}, {expired_interval,{2,3}}]}},
-                find_expired(proxy_test_bucket, R))
+                Expired)
         end
     ].
 

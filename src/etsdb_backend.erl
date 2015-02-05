@@ -21,7 +21,6 @@
 -type value() :: term().
 -type kv()::{key(), value()}.
 -type kv_list()::[kv()].
--type expired_records()::{expired_records, {Count :: non_neg_integer(), [key()]}}.
 
 -type range() :: term(). %% defined by bucket
 -type acc()::term(). %% determined by user function
@@ -31,6 +30,10 @@
 -type fold_function() :: fun(() -> {ok, acc()} | {error, Reason :: term()}).
 -type scan_result()::{async, fold_function()}.
 -type fold_objects_function() :: fun((key(), value(), acc()) -> acc()).
+
+-type expired_records()::{expired_records, {Count :: non_neg_integer(), [key()]}}.
+-type find_expired_fun() :: fun(() -> expired_records()). 
+-type find_expired_result() :: {async, find_expired_fun()}.
 
 -export_type([partition/0, config/0, state/0, state_or_error/0, bucket/0, kv_list/0, expired_records/0, scan_query/0, 
     fold_function/0, scan_result/0, fold_objects_function/0]).
@@ -45,7 +48,7 @@
 -callback scan(Bucket :: bucket(), From :: range(), To :: range(), Acc :: acc(), State :: state()) -> scan_result().
 -callback fold_objects(FoldFun :: fold_objects_function(), Acc :: acc(), State :: state()) -> scan_result().
 
--callback find_expired(Bucket :: bucket(), State :: state()) -> expired_records().
+-callback find_expired(Bucket :: bucket(), State :: state()) -> find_expired_result().
 -callback delete(Bucket :: bucket(), KeysToDelete :: [key()], State :: state()) -> state_or_error(). %% should delete records and expired
 
 -callback is_empty(State :: state()) -> boolean().
