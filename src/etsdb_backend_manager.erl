@@ -22,7 +22,6 @@
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2, terminate/2, code_change/3]).
 
 -type backend_key() :: {Start::non_neg_integer(), End::non_neg_integer()}.
--type backend_description() :: {BackendRef :: term() | undefined , Key :: backend_key()}.
 
 -record(backend_info, {
     key :: {StartTimestamp :: non_neg_integer(), Partition :: term()},
@@ -67,7 +66,7 @@ release(Partition, Key, NewState) ->
     gen_server:cast(?MODULE, {release, Partition, Key, NewState, Caller}),
     ok.
 
--spec list_backends(term()) -> {ok, Backends :: backend_description()} | {error, Reason :: term()}.
+-spec list_backends(term()) -> [backend_key()].
 list_backends(Partition) ->
     gen_server:call(?MODULE, {list_backends, Partition}).
 

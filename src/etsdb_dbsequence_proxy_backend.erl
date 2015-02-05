@@ -15,6 +15,8 @@
 -include_lib("eunit/include/eunit.hrl").
 -endif.
 
+-include("etsdb_request.hrl").
+
 %% API
 -export([init/2, stop/1, drop/1, save/3, scan/3, scan/5, fold_objects/3, find_expired/2, delete/3, is_empty/1]).
 
@@ -68,7 +70,8 @@ save(Bucket, KvList, State = #state{rotation_interval = RotationInterval}) ->
             
     end.
 
-scan(Query, Acc, #state{partition = Partition, source_module = Mod}) ->
+scan(Query = [#pscan_req{start_time = Start, end_time = End}], Acc, 
+        #state{partition = Partition, source_module = Mod}) ->
     Resp = fun() ->
         try
             ScanRes = lists:foldl(
@@ -82,7 +85,7 @@ scan(Query, Acc, #state{partition = Partition, source_module = Mod}) ->
                             throw({scan_failed, Key, Reason})
                     end
                 end, 
-                Acc, etsdb_backend_manager:list_backends(Partition)),
+                Acc, calc_scan_intervals(Start, End, Partition)),
             {ok, ScanRes}
         catch
             {scan_failed, Key, Reason} ->
@@ -91,8 +94,8 @@ scan(Query, Acc, #state{partition = Partition, source_module = Mod}) ->
     end,
     {async, Resp}.
 
-scan(Bucket,From,To,Acc,#state{partition = Partition, source_module = Mod, rotation_interval = ExchangeInterval}) ->
-    Intervals = calc_scan_intervals(From, To, ExchangeInterval),
+scan(Bucket,From,To,Acc,#state{partition = Partition, source_module = Mod}) ->
+    Intervals = calc_scan_intervals(From, To, Partition),
     Resp = fun() ->
         try
             ScanRes = lists:foldl(
@@ -208,16 +211,11 @@ mk_path(Config, {Start, End}) ->
     BackendFileName = io_lib:format("~20..0B-~20..0B", [Start, End]),
     filename:join(DataRoot, BackendFileName).
 
-calc_scan_intervals(From, To, ExchangeInterval) ->
-    First = From - (From rem ExchangeInterval),
-    ToRem = To rem ExchangeInterval,
-    Last = if 
-               ToRem /= 0 ->
-                   To - ToRem;
-               ToRem == 0 ->
-                   To - ExchangeInterval
-           end,
-    [{X, X + ExchangeInterval} || X <- lists:seq(First, Last, ExchangeInterval)].
+
+calc_scan_intervals(From, inf, Partition) ->
+    lists:dropwhile(fun({_IFrom, ITo}) -> ITo =< From end, etsdb_backend_manager:list_backends(Partition));
+calc_scan_intervals(From, To, Partition) ->
+    lists:takewhile(fun({IFrom, _ITo}) -> IFrom =< To end, calc_scan_intervals(From, inf, Partition)).
 
 init_sequence(Partition, Config, SrcModule) ->
     DataRoot = etsdb_util:propfind(data_root, Config, "./data"),
@@ -439,8 +437,6 @@ drop_test_() ->
         end
     ].
 
--include("etsdb_request.hrl").
-
 scan_req_test_() ->
     Config = [{proxy_source, [proxy_test_backend, deeper_backend]}, {data_root, "/home/admin/data"},
         {max_loaded_backends, 3}, {rotation_interval, {1,s}}, {expiration_time, {1, s}}],
@@ -506,7 +502,7 @@ scan_simple_test_() ->
             {async, Fun} = RR1,
             ?assert(is_function(Fun, 0)),
             RR2 = Fun(),
-            ?assertEqual({ok, [1,1]}, RR2)
+            ?assertEqual({ok, [1,1, 1]}, RR2)
         end,
         
         fun() ->
@@ -527,14 +523,22 @@ scan_simple_test_() ->
     ].
 
 calc_scan_intervals_test_() ->
+    Config = [{proxy_source, [proxy_test_backend, deeper_backend]}, {data_root, "/home/admin/data"},
+        {max_loaded_backends, 3}, {rotation_interval, {1,s}}, {expiration_time, {1, s}}],
+    etsdb_backend_manager:start_link(Config),
+    mock_read_sequence_100(),
+    {ok, _} = init(113, Config),
     [
-        ?_assertEqual([{200, 300}, {300, 400}], calc_scan_intervals(200, 400, 100)),
-        ?_assertEqual([{100, 200}, {200, 300}, {300, 400}], calc_scan_intervals(185, 400, 100)),
-        ?_assertEqual([{200, 300}, {300, 400}], calc_scan_intervals(213, 400, 100)),
-        ?_assertEqual([{200, 300}, {300, 400}], calc_scan_intervals(200, 386, 100)),
-        ?_assertEqual([{200, 300}, {300, 400}, {400, 500}], calc_scan_intervals(200, 401, 100)),
-        ?_assertEqual([{100, 200}, {200, 300}, {300, 400}, {400, 500}], calc_scan_intervals(185, 420, 100))
+        ?_assertEqual([{200, 300}, {300, 400}], test_calc_scan_intervals(200, 399, 100)),
+        ?_assertEqual([{100, 200}, {200, 300}, {300, 400}], test_calc_scan_intervals(185, 399, 100)),
+        ?_assertEqual([{200, 300}, {300, 400}], test_calc_scan_intervals(213, 399, 100)),
+        ?_assertEqual([{200, 300}, {300, 400}], test_calc_scan_intervals(200, 386, 100)),
+        ?_assertEqual([{200, 300}, {300, 400}, {400, 500}], test_calc_scan_intervals(200, 401, 100)),
+        ?_assertEqual([{100, 200}, {200, 300}, {300, 400}, {400, 500}], test_calc_scan_intervals(185, 420, 100))
     ].
+
+test_calc_scan_intervals(From, To, _Incr) ->
+    calc_scan_intervals(From, To, 113).
 
 fold_test_() ->
     Config = [{proxy_source, [proxy_test_backend, deeper_backend]}, {data_root, "/home/admin/data"},
@@ -588,6 +592,12 @@ mock_read_sequence() ->
     meck:expect(etsdb_dbsequence_proxy_fileaccess, read_sequence,
         fun(DataRoot) when is_list(DataRoot) ->
             [filename:join(DataRoot, integer_to_list(X)) ++ "-" ++ integer_to_list(X + 1) || X <- lists:seq(0, 4)]
+        end).
+
+mock_read_sequence_100() ->
+    meck:expect(etsdb_dbsequence_proxy_fileaccess, read_sequence,
+        fun(DataRoot) when is_list(DataRoot) ->
+            [filename:join(DataRoot, integer_to_list(X)) ++ "-" ++ integer_to_list(X + 100) || X <- lists:seq(0, 400, 100)]
         end).
 
 -endif.
