@@ -562,6 +562,13 @@ fold_test_() ->
         end
     ].
 
+monitors_test() ->
+    %% not exactly test, still checks that manager will not crash
+    R = etsdb_backend_manager:acquire(112, {0, 1}),
+    ?assertMatch({ok, _}, R).
+    %% at this point monitoring should remove broken reference to acquired partition, but we cannot check it.
+    %% Still we'll see code being executed in cover analysis results.
+
 
 %% MOCKS
 
