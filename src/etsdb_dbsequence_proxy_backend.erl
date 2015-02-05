@@ -139,7 +139,7 @@ fold_objects(FoldObjectsFun, Acc, #state{partition = Partition, source_module = 
     {async, Resp}.
 
 find_expired(_Bucket, #state{partition = Partition, config = Config, rotation_interval = ExchangeInterval}) ->
-    ExparartionTime = etsdb_pretty_time:to_sec(etsdb_util:propfind(exparation_time, Config, {24, h})),
+    ExparartionTime = etsdb_pretty_time:to_sec(etsdb_util:propfind(expiration_time, Config, {24, h})),
     ExpireBefore = etsdb_util:system_time(sec) - ExparartionTime,
     ExpireIntervalsUpTo = ExpireBefore - (ExpireBefore rem ExchangeInterval),
     Intervals = etsdb_backend_manager:list_backends(Partition),
@@ -371,7 +371,7 @@ save_test_() ->
 
 find_expired_test_() ->
     Config = [{proxy_source, [proxy_test_backend, deeper_backend]}, {data_root, "/home/admin/data"},
-        {max_loaded_backends, 3}, {rotation_interval, {1,s}}, {exparation_time, {1, s}}],
+        {max_loaded_backends, 3}, {rotation_interval, {1,s}}, {expiration_time, {1, s}}],
     etsdb_backend_manager:start_link(Config),
     mock_read_sequence(),
     meck:new(etsdb_util, [strict, passthrough]),
@@ -404,7 +404,7 @@ find_expired_test_() ->
 
 drop_test_() ->
     Config = [{proxy_source, [proxy_test_backend, deeper_backend]}, {data_root, "/home/admin/data"},
-        {max_loaded_backends, 3}, {rotation_interval, {1,s}}, {exparation_time, {1, s}}],
+        {max_loaded_backends, 3}, {rotation_interval, {1,s}}, {expiration_time, {1, s}}],
     etsdb_backend_manager:start_link(Config),
     mock_read_sequence(),
     catch meck:new(etsdb_dbsequence_proxy_fileaccess, [strict]),
@@ -431,7 +431,7 @@ drop_test_() ->
 
 scan_req_test_() ->
     Config = [{proxy_source, [proxy_test_backend, deeper_backend]}, {data_root, "/home/admin/data"},
-        {max_loaded_backends, 3}, {rotation_interval, {1,s}}, {exparation_time, {1, s}}],
+        {max_loaded_backends, 3}, {rotation_interval, {1,s}}, {expiration_time, {1, s}}],
     etsdb_backend_manager:start_link(Config),
     mock_read_sequence(),
     Req = [#pscan_req{}],
@@ -478,7 +478,7 @@ scan_req_test_() ->
 
 scan_simple_test_() ->
     Config = [{proxy_source, [proxy_test_backend, deeper_backend]}, {data_root, "/home/admin/data"},
-        {max_loaded_backends, 3}, {rotation_interval, {1,s}}, {exparation_time, {1, s}}],
+        {max_loaded_backends, 3}, {rotation_interval, {1,s}}, {expiration_time, {1, s}}],
     etsdb_backend_manager:start_link(Config),
     mock_read_sequence(),
     catch meck:new(proxy_test_backend, [non_strict]),
@@ -526,7 +526,7 @@ calc_scan_intervals_test_() ->
 
 fold_test_() ->
     Config = [{proxy_source, [proxy_test_backend, deeper_backend]}, {data_root, "/home/admin/data"},
-        {max_loaded_backends, 3}, {rotation_interval, {1,s}}, {exparation_time, {1, s}}],
+        {max_loaded_backends, 3}, {rotation_interval, {1,s}}, {expiration_time, {1, s}}],
     etsdb_backend_manager:start_link(Config),
     mock_read_sequence(),
     catch meck:new(proxy_test_backend, [non_strict]),
