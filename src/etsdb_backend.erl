@@ -26,7 +26,7 @@
 -type acc()::term(). %% determined by user function
 
 
--type scan_query()::[#pscan_req{}].
+-type scan_query()::#pscan_req{}.
 -type fold_function() :: fun(() -> {ok, acc()} | {error, Reason :: term()}).
 -type scan_result()::{async, fold_function()}.
 -type fold_objects_function() :: fun((key(), value(), acc()) -> acc()).
@@ -35,8 +35,8 @@
 -type find_expired_fun() :: fun(() -> expired_records()). 
 -type find_expired_result() :: {async, find_expired_fun()}.
 
--export_type([partition/0, config/0, state/0, state_or_error/0, bucket/0, kv_list/0, expired_records/0, scan_query/0, 
-    fold_function/0, scan_result/0, fold_objects_function/0]).
+-export_type([partition/0, config/0, state/0, state_or_error/0, bucket/0, kv_list/0, scan_query/0,
+    fold_function/0, scan_result/0, fold_objects_function/0, find_expired_result/0]).
 
 -callback init(Partition :: partition(), Config :: config()) -> {ok, state()} | {error, Reason :: term()}.
 -callback stop(State :: state()) -> ok.
