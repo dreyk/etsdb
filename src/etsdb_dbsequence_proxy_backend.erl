@@ -291,18 +291,15 @@ do_save(_, {error, Reason}, _, State) ->
 
 -ifdef(TEST).
 
-a_prepare_test() ->
-    meck:new(etsdb_dbsequence_proxy_fileaccess, [strict]),
-    meck:new(proxy_test_backend, [non_strict]).
-
-z_tear_down_test() ->
-    meck:unload().
+prepare_test() ->
+    catch meck:new(etsdb_dbsequence_proxy_fileaccess, [strict]),
+    catch meck:new(proxy_test_backend, [non_strict]).
 
 is_empty_test_() ->
     Config = [{proxy_source, [proxy_test_backend, deeper_backend]},
         {data_root, "/home/admin/data"}, {max_loaded_backends, 3}],
     etsdb_backend_manager:start_link(Config),
-    meck:new(proxy_test_backend, [non_strict]),
+    catch meck:new(proxy_test_backend, [non_strict]),
     mock_read_sequence(),
     meck:expect(proxy_test_backend, stop, fun(_) -> ok end),
     meck:expect(proxy_test_backend, init, fun(_Partition, _Config) -> {ok, init} end),
@@ -328,7 +325,7 @@ save_test_() ->
     meck:expect(proxy_test_backend, stop, fun(_) -> ok end),
     meck:expect(proxy_test_backend, init, fun(_Partition, _Config) -> {ok, init} end),
     TestData = [{k1, v1}, {k2, v2}, {k3, v3}, {k4, v4}],
-    meck:new(proxy_test_bucket, [non_strict]),
+    catch meck:new(proxy_test_bucket, [non_strict]),
     meck:expect(proxy_test_bucket, partition_by_time,
         fun(_Kv, Interval) ->
             ?assertEqual(1, Interval),
@@ -375,7 +372,7 @@ find_expired_test_() ->
         {max_loaded_backends, 3}, {rotation_interval, {1,s}}, {expiration_time, {1, s}}],
     etsdb_backend_manager:start_link(Config),
     mock_read_sequence(),
-    meck:new(etsdb_util, [strict, passthrough]),
+    catch meck:new(etsdb_util, [strict, passthrough]),
     meck:expect(proxy_test_backend, drop, fun(init) -> {ok, destoyed} end),
     [
         fun() ->
@@ -584,6 +581,9 @@ monitors_test() ->
     ?assertMatch({ok, _}, R).
     %% at this point monitoring should remove broken reference to acquired partition, but we cannot check it.
     %% Still we'll see code being executed in cover analysis results.
+
+tear_down_test() ->
+    meck:unload().
 
 
 %% MOCKS
