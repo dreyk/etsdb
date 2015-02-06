@@ -6,7 +6,9 @@
 -record(etsdb_store_res_v1,{count,error_count,errors}).
 
 -record(scan_it,{rgn_count,partition,rgn,from,to,start_rgn,end_rgn}).
--record(pscan_req,{partition,n_val,quorum,function,catch_end_of_data = false, start_time = 0, end_time = inf}).
+
+-type timestamp() :: non_neg_integer() | inf. %% timestamp in SECONDS like etsdbutil:system_time(sec) retunrs
+-record(pscan_req,{partition,n_val,quorum,function,catch_end_of_data = false, start_time = 0 :: timestamp(), end_time = inf :: timestamp()}).
 -record(scan_req,{end_fun,join_fun,final_fun,pscan}).
 
 -define(ETSDB_STORE_REQ, #etsdb_store_req_v1).
