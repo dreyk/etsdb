@@ -24,7 +24,8 @@
     partition::non_neg_integer(),
     source_module::module(),
     config::proplists:proplist(),
-    rotation_interval::pos_integer()
+    rotation_interval::pos_integer(),
+    current_save_partition :: {Key :: term(), PartitionRef :: term()} | undefined
 }).
 
 init(Partition, Config) ->
@@ -266,26 +267,52 @@ backend_path(Start, #state{config = Config, rotation_interval = Interval}) ->
     BackendFileName = io_lib:format("~20..0B-~20..0B", [Start, End]),
     filename:join(DataRoot, BackendFileName).
 
-do_save({Start, End, IntervalKvList}, ok, Bucket, State = #state{partition = Partition, source_module = Mod}) ->
+do_save({Start, End, IntervalKvList}, ok, Bucket, OldState = #state{partition = Partition, source_module = Mod}) ->
     Key = {Start, End},
-    case acquire(Partition, Key) of
+    {AcqRes, State} = save_acquire(Partition, Key, OldState),
+    case  AcqRes of
         {error, does_not_exist} ->
             #state{config = Config} = State,
             Path = backend_path(Start, State),
+            NewState = relase_current_partition(State),
             true = etsdb_backend_manager:add(Partition, Path, Start, End, Config, Mod),
-            do_save({Start, End, IntervalKvList}, ok, Bucket, State);
+            do_save({Start, End, IntervalKvList}, ok, Bucket, NewState);
         {ok, Ref} ->
             case Mod:save(Bucket, IntervalKvList, Ref) of
                 {ok, S} ->
-                    etsdb_backend_manager:release(Partition, Key, S),
-                    {ok, State};
+                    NewState = save_release(Partition, Key, S, State),
+                    {ok, NewState};
                 {error, Reason, S} ->
-                    etsdb_backend_manager:release(Partition, Key, S),
-                    {{error, Reason}, State}
+                    NewState = save_release(Partition, Key, S, State),
+                    {{error, Reason}, NewState}
             end
     end;
 do_save(_, {error, Reason}, _, State) ->
     {{error, Reason}, State}.
+
+save_acquire(_Partition, Key, State = #state{current_save_partition = {Key, Ref}}) ->
+    {{ok, Ref}, State};
+save_acquire(Partition, Key, State = #state{current_save_partition = undefined}) ->
+    case acquire(Partition, Key) of
+        {ok, Ref} = Res ->
+            {Res, State#state{current_save_partition = {Key, Ref}}};
+        Else ->
+            {Else, State}
+    end;
+save_acquire(Partition, Key, State) ->
+    {acquire(Partition, Key), State}.
+
+save_release(_Partition, Key, BackendRef, State = #state{current_save_partition = {Key, _}}) ->
+    State#state{current_save_partition = {Key, BackendRef}};
+save_release(Partition, Key, BackendRef, State) ->
+    ok = etsdb_backend_manager:release(Partition, Key, BackendRef),
+    State.
+
+relase_current_partition(State = #state{current_save_partition = undefined}) ->
+    State;
+relase_current_partition(State = #state{current_save_partition = {Key, Ref}, partition = Partition}) ->
+    ok = etsdb_backend_manager:release(Partition, Key,Ref),
+    State#state{current_save_partition = undefined}.
 
 %% ------------------------------------ TEST ---------------------------------------------------------------------------
 
@@ -333,6 +360,7 @@ save_test_() ->
         end),
     [
         fun() ->
+            {ok, R} = init(112, Config),
             meck:expect(proxy_test_backend, save,
                 fun(Bucket, KvList, State) ->
                     ?assertEqual(init, State),
@@ -344,11 +372,26 @@ save_test_() ->
                     ),
                     {ok, saved}
                 end),
-            {ok, R} = init(112, Config),
-            RR = save(proxy_test_bucket, TestData, R),
-            ?assertMatch({ok, #state{}}, RR),
-            {ok, S} = RR,
-            ?assertMatch(ok, stop(S))
+            
+            RR1 = save(proxy_test_bucket, TestData, R),
+            ?assertMatch({ok, #state{current_save_partition = {{5,6}, saved}}}, RR1),
+            {ok, S1} = RR1,
+
+            meck:expect(proxy_test_backend, save,
+                fun(Bucket, KvList, State) ->
+                    ?assertEqual(saved, State),
+                    ?assertEqual(proxy_test_bucket, Bucket),
+                    ?assert(
+                        KvList ==  [{k1, v1}]
+                            orelse KvList == [{k2, v2}, {k3, v3}]
+                            orelse KvList == [{k4, v4}]
+                    ),
+                    {ok, saved2}
+                end),
+            RR2 = save(proxy_test_bucket, TestData, S1),
+            ?assertMatch({ok, #state{current_save_partition = {{5,6}, saved2}}}, RR2),
+            {ok, S2} = RR2,
+            ?assertMatch(ok, stop(S2))
         end,
 
         fun() ->
@@ -360,9 +403,9 @@ save_test_() ->
                         {ok, State}
                 end),
             {ok, R} = init(112, Config),
-            RR = save(proxy_test_bucket, TestData, R),
+            RR1 = save(proxy_test_bucket, TestData, R),
             ?assertMatch({error, {backend_save_failed, failed}, #state{}}, RR),
-            {_, _, S} = RR,
+            {_, _, S1} = RR,
             ?assertMatch(ok, stop(S))
         end
     ].
