@@ -404,9 +404,9 @@ save_test_() ->
                 end),
             {ok, R} = init(112, Config),
             RR1 = save(proxy_test_bucket, TestData, R),
-            ?assertMatch({error, {backend_save_failed, failed}, #state{}}, RR),
-            {_, _, S1} = RR,
-            ?assertMatch(ok, stop(S))
+            ?assertMatch({error, {backend_save_failed, failed}, #state{}}, RR1),
+            {_, _, S1} = RR1,
+            ?assertMatch(ok, stop(S1))
         end
     ].
 
