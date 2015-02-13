@@ -21,6 +21,8 @@
 %% @doc it's ets table backend.
 -module(etsdb_leveldb_backend).
 
+-behaviour(etsdb_backend).
+
 -record(state, {ref :: reference(),
                 data_root :: string(),
                 open_opts = [],
@@ -183,7 +185,7 @@ multi_fold(Order,Ref,FoldOpts,StartIterate,Fun,BatchSize, Acc, Patterns)->
     end.
 
 is_empty(#state{ref=Ref}) ->
-   eleveldb:is_empty(Ref).
+    eleveldb:is_empty(Ref).
 
 fold_objects(FoldObjectsFun, Acc, #state{fold_opts=FoldOpts,ref=Ref}) ->  
     FoldFun = fun({StorageKey, Value}, Acc1) ->

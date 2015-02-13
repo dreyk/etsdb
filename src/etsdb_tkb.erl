@@ -20,6 +20,10 @@
 %% @doc Simple implementation tsdb bucket for storing any data in {id,time} order
 -module(etsdb_tkb).
 
+-ifdef(TEST).
+-include_lib("eunit/include/eunit.hrl").
+-endif.
+
 
 
 -export([
@@ -34,7 +38,8 @@
   read/4,
   def_join_fun/2,
   def_end_fun/1,
-  read_spec/3]).
+  read_spec/3,
+  partition_by_time/2]).
 
 -behaviour(etsdb_bucket).
 
@@ -96,10 +101,14 @@ partiotion_by_region(ID) ->
 read_spec(_ID, Time1, Time2) when Time1 > Time2 ->
   empty;
 read_spec(ID, Time1, Time2) ->
-  PScan = #pscan_req{partition = partiotion_by_region(ID),
-  n_val = 3,
-  quorum = 2,
-  function = {?MODULE, read, [ID, Time1, Time2]}},
+  PScan = #pscan_req{
+    partition = partiotion_by_region(ID),
+    n_val = 3,
+    quorum = 2,
+    function = {?MODULE, read, [ID, Time1, Time2]},
+    start_time = Time1 div 1000,
+    end_time = Time2 div 1000
+  },
   #scan_req{pscan = PScan,
   end_fun = {?MODULE, def_end_fun, []},
   join_fun = {?MODULE, def_join_fun, []}}.
@@ -125,3 +134,39 @@ def_end_fun(Data) ->
 
 def_join_fun(NewData, OldData) ->
   orddict:merge(fun(_, V1, _) -> V1 end, NewData, OldData).
+
+partition_by_time(KvList, ExchangeInterval) ->
+  IntervalsDict = lists:foldl(
+    fun({K, _V} = Kv, CurrDict) ->
+      {?PREFIX, _, Time} = sext:decode(K),
+      SecTime = Time div 1000,
+      Interval = SecTime  - SecTime rem ExchangeInterval,
+      orddict:append(Interval, Kv, CurrDict)
+    end,
+    orddict:new(), KvList),
+  IntervalsList = orddict:to_list(IntervalsDict),
+  lists:map(
+    fun({Start, Value}) ->
+      {Start, Start + ExchangeInterval, Value}
+    end,
+    IntervalsList).
+
+-ifdef(TEST).
+partition_by_time_test_() ->
+  [
+    ?_assertMatch([{200, 300, _}, {300, 400, _}], test_keys(200, 399, 100)),
+    ?_assertMatch([{200, 300, _}, {300, 400, _}, {400, 500, _}], test_keys(200, 400, 100)),
+    ?_assertMatch([{100, 200, _}, {200, 300, _}, {300, 400, _}], test_keys(185, 399, 100)),
+    ?_assertMatch([{200, 300, _}, {300, 400, _}], test_keys(213, 400, 100)),
+    ?_assertMatch([{200, 300, _}, {300, 400, _}], test_keys(200, 386, 100)),
+    ?_assertMatch([{200, 300, _}, {300, 400, _}, {400, 500, _}], test_keys(200, 401, 100)),
+    ?_assertMatch([{100, 200, _}, {200, 300, _}, {300, 400, _}, {400, 500, _}], test_keys(185, 420, 100))
+  ].
+
+
+test_keys(From, To, Incr) ->
+  Keys = [{sext:encode({?PREFIX, test_id, Time * 1000}), test_value} || Time <- lists:seq(From, To, 10)],
+  partition_by_time(Keys, Incr).
+
+-endif.
+ 
