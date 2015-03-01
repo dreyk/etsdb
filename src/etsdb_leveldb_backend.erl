@@ -34,7 +34,7 @@
          save/3,
          scan/5,
          find_expired/2,
-         delete/3,stop/1,drop/1,fold_objects/3,is_empty/1,scan/3,multi_scan/4,multi_scan/2]).
+         delete/3,stop/1,drop/1,fold_objects/3,is_empty/1,scan/3,multi_scan/4,multi_scan/2, read_prev/2]).
 
 -include("etsdb_request.hrl").
 
@@ -118,6 +118,34 @@ scan(Bucket,From,To,Acc,#state{ref=Ref,fold_opts=FoldOpts})->
     FoldFun = fun() ->
                       multi_fold(reverse,Ref, FoldOpts, StartIterate, Fun,BatchSize,Acc, Patterns) end,
     {async,FoldFun}.
+
+-type read_fn() :: fun(() -> {ok, OrigKey :: Key, ActualKey :: binary(), Value :: binary()} | {not_found, OrigKey :: Key}).
+-spec read_prev(Key :: binary(), Ref :: #state{}) -> {async, ReadFn :: read_fn()}.
+read_prev(Key, #state{ref = Ref}) when is_binary(Key)->
+    Resp = fun() ->
+        try
+            {ok, Iter} = eleveldb:iterator(Ref, []),
+            case eleveldb:iterator_move(Iter, Key) of
+                {ok, Key, Value} ->
+                    {ok, Key, Key, Value};
+                {ok, _K, _V} ->
+                    try_read_move(Iter, Key, prev);
+                {error, _} ->
+                    try_read_move(Iter, Key, last)
+            end
+        after
+            catch eleveldb:iterator_close(Iter)
+        end
+    end,
+    {async, Resp}.
+
+try_read_move(Ref, Key, Where) ->
+    case eleveldb:iterator_move(Ref, Where) of
+        {ok, K2, Value} when K2 < Key ->
+            {ok, Key, K2, Value};
+        _ ->
+            {nof_found, Key}
+    end.
 
 multi_scan([],_Ref,_FoldOpts,Acc)->
     {ok,Acc};
