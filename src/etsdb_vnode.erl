@@ -22,25 +22,26 @@
 -author('Alex G. <gunin@mail.mipt.ru>').
 
 -export([start_vnode/1,
-         init/1,
-         handle_command/3,
-         handle_handoff_command/3,
-         handle_handoff_data/2,
-         handoff_cancelled/1,
-         handle_info/2,
-         handoff_finished/2,
-         handoff_starting/2,
-         encode_handoff_item/2,
-         terminate/2,
-         delete/1,
-         handle_coverage/4,
-         is_empty/1,
-         handle_exit/3,
-         put_internal/3,
-         put_external/4,
-         put_external/5,
-         get_query/4,
-         scan/3]).
+    init/1,
+    handle_command/3,
+    handle_handoff_command/3,
+    handle_handoff_data/2,
+    handoff_cancelled/1,
+    handle_info/2,
+    handoff_finished/2,
+    handoff_starting/2,
+    encode_handoff_item/2,
+    terminate/2,
+    delete/1,
+    handle_coverage/4,
+    is_empty/1,
+    handle_exit/3,
+    put_internal/3,
+    put_external/4,
+    put_external/5,
+    get_query/4,
+    scan/3,
+    read_prev/3]).
 
 -behaviour(riak_core_vnode).
 
@@ -65,6 +66,8 @@ put_external(ReqID,Preflist,Bucket,Data)->
 
 scan(ReqID,Vnode,Scans)->
     riak_core_vnode_master:command([{Vnode,node()}],#etsdb_get_query_req_v1{get_query=Scans,req_id=ReqID,bucket=custom_scan},{fsm,undefined,self()},etsdb_vnode_master).
+read_prev(ReqId, Vnode, Key)->
+    riak_core_vnode_master:command([{Vnode,node()}],#etsdb_read_prev_req{key=Key,req_id=ReqId},{fsm,undefined,self()},etsdb_vnode_master).
 get_query(ReqID,Preflist,Bucket,Query)->
     riak_core_vnode_master:command(Preflist,#etsdb_get_query_req_v1{get_query=Query,req_id=ReqID,bucket=Bucket},{fsm,undefined,self()},etsdb_vnode_master).
 
@@ -214,8 +217,22 @@ handle_command(?FOLD_REQ{foldfun=FoldFun, acc0=Acc0}, Sender,
         Else->
             riak_core_vnode:reply(Sender,{error,Else}),
             {noreply, State}
+    end;
+
+handle_command(#etsdb_read_prev_req{key = Key, req_id = ReqId}, Sender,
+        State = #state{backend = Backend, backend_ref = Ref, vnode_index = Index}) ->
+    case Backend:read_prev(Key, Ref) of
+        {async, ReadFun} ->
+            RespFun = fun() ->
+                Resp = ReadFun(),
+                {e,Index,ReqId,Resp}
+            end,
+            {async, {invoke, RespFun}, Sender, State};
+        Else ->
+            riak_core_vnode:reply(Sender,{error,Else}),
+            {noreply, State}
     end.
-    
+
 
 handle_info(timeout,State)->
     lager:debug("receive timeout ~p",[State]),
