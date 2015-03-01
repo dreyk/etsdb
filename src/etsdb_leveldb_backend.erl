@@ -38,6 +38,10 @@
 
 -include("etsdb_request.hrl").
 
+-ifdef (TEST).
+-include_lib("eunit/include/eunit.hrl").
+-endif.
+
 init(Partition, Config) ->
     %% Initialize random seed
     random:seed(now()),
@@ -123,8 +127,8 @@ scan(Bucket,From,To,Acc,#state{ref=Ref,fold_opts=FoldOpts})->
 -spec read_prev(Key :: binary(), Ref :: #state{}) -> {async, ReadFn :: read_fn()}.
 read_prev(Key, #state{ref = Ref}) when is_binary(Key)->
     Resp = fun() ->
+        {ok, Iter} = eleveldb:iterator(Ref, []),
         try
-            {ok, Iter} = eleveldb:iterator(Ref, []),
             case eleveldb:iterator_move(Iter, Key) of
                 {ok, Key, Value} ->
                     {ok, Key, Key, Value};
@@ -144,7 +148,7 @@ try_read_move(Ref, Key, Where) ->
         {ok, K2, Value} when K2 < Key ->
             {ok, Key, K2, Value};
         _ ->
-            {nof_found, Key}
+            {not_found, Key}
     end.
 
 multi_scan([],_Ref,_FoldOpts,Acc)->
@@ -333,3 +337,40 @@ config_value(Key, Config, Default) ->
         {ok, Value} ->
             Value
     end.
+
+-ifdef(TEST).
+
+read_prev_test_wrapper(Ref, Key) ->
+    {async, F} = read_prev(Key, #state{ref = Ref}),
+    F().
+
+read_prev_test_() ->
+    {
+        setup,
+        fun() ->
+            {ok, Ref} = eleveldb:open("/tmp/read_prev_test.db", [{create_if_missing, true}]),
+            ok = eleveldb:write(Ref, [
+                {put, <<"a4">>, <<"a4">>},
+                {put, <<"k000">>, <<"k0">>},
+                {put, <<"k002">>, <<"v1">>},
+                {put, <<"k010">>, <<"k10">>},
+                {put, <<"u55">>, <<"u55">>}
+            ], []),
+            Ref
+        end,
+        fun(Ref) ->
+            eleveldb:close(Ref),
+            eleveldb:destroy("/tmp/read_prev_test.db", [])
+        end,
+        fun(Ref) ->
+            [
+                ?_assertEqual({not_found, <<"a2">>}, read_prev_test_wrapper(Ref, <<"a2">>)),
+                ?_assertEqual({ok, <<"k001">>, <<"k000">>, <<"k0">>}, read_prev_test_wrapper(Ref, <<"k001">>)),
+                ?_assertEqual({ok, <<"k002">>, <<"k002">>, <<"v1">>}, read_prev_test_wrapper(Ref, <<"k002">>)),
+                ?_assertEqual({ok, <<"k888">>, <<"k010">>, <<"k10">>}, read_prev_test_wrapper(Ref, <<"k888">>)),
+                ?_assertEqual({ok, <<"z1">>, <<"u55">>, <<"u55">>}, read_prev_test_wrapper(Ref, <<"z1">>))
+            ]
+        end
+    }.
+
+-endif.
