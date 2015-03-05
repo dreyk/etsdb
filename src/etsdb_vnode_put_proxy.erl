@@ -45,6 +45,8 @@ put(AccHandler,Bucket,Data)->
     SerializedData = Bucket:serialize(Data),
     gen_server:cast(To,{put,AccHandler,SerializedData}).
 
+
+
 reg_name(Partition,Bucket)->
     FullName="etsb_v_put_proxy_"++atom_to_list(Bucket)++"_"++integer_to_list(Partition),
     list_to_atom(FullName).
