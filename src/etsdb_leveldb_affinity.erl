@@ -32,12 +32,33 @@ get_path(Index, Props) ->
                        error({"Invalid leveldb path spec", PathListOrPath})
                end,
     Modulus = length(PathList),
-    PathIndex = (Index rem Modulus) + 1,
+    {ok, Ring} = riak_core_ring_manager:get_my_ring(),
+    Local = node(),
+    [MasterIndx | _] = [X || {X, H} <- riak_core_ring:preflist(<<Index:160>>,Ring), H =:= Local],
+    MasterIndices = riak_core_ring:my_indices(Ring),
+    PosInMaster = length(lists:takewhile(fun(X) -> X /= MasterIndx end, MasterIndices)),
+    PathIndex = (PosInMaster rem Modulus) + 1,
     lists:nth(PathIndex, PathList).
 
 
 %% TEST
 -ifdef(TEST).
+
+init_test() ->
+    meck:new([riak_core_ring_manager, riak_core_ring]),
+    meck:expect(riak_core_ring_manager, get_my_ring, [{
+        [],
+        {ok, 'ring'}
+    }]),
+    meck:expect(riak_core_ring, preflist, fun(<<Index:160>>, 'ring') ->
+        [{Index, node()}] end
+    ),
+    meck:expect(riak_core_ring, my_indices, [{
+        ['ring'],
+        [0, 1, 2, 3, 12335435467564343245236579]
+        
+    }])
+    .
 list_test_() ->
     Prop = [
                 {data_root, ["./data/leveldb/1", "./data/leveldb/2", "./data/leveldb/3", "./data/leveldb/4", "./data/leveldb/5"]},
@@ -91,4 +112,8 @@ empty_spec_test_() ->
         ?_assertEqual(get_path(103353454656754623110575, Prop), "./data/leveldb"),
         ?_assertEqual(get_path(12335435467564343245236579, Prop), "./data/leveldb")
     ].
+
+teardown_test() ->
+    meck:unload().
+
 -endif.
