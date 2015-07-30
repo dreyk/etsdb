@@ -82,16 +82,21 @@ save(_Bucket,Data,#state{ref=Ref,write_opts=WriteOpts}=State) ->
             {error, Reason, State}
     end.
 find_expired(Bucket,#state{ref=Ref,fold_opts=FoldOpts})->
-    {StartIterate,Fun} = Bucket:expire_spec(?MODULE),
+    {StartIterate,Fun,BatchSize, Patterns} = case Bucket:expire_spec(?MODULE) of
+                                                 {T1, T2, T3, T4} ->
+                                                     {T1, T2, T3, T4};
+                                                 {T1,T2,T3}->
+                                                     {T1,T2,T3, undefined};
+                                                 {T1,T2}->
+                                                     {T1,T2,1, undefined}
+                                             end,
     FoldFun = fun() ->
-                try
-                    FoldResult = eleveldb:fold(Ref,Fun,{0,[]}, [{first_key,StartIterate} | FoldOpts]),
-                    {expired_records,FoldResult}
-                catch
-                    {break, AccFinal} ->
-                        {expired_records,AccFinal}
-                end
-        end,
+        case multi_fold(direct,Ref, FoldOpts, StartIterate, Fun,BatchSize,{0,[]}, Patterns) of
+            {ok,R}->
+                {expired_records,R};
+            Else->
+                Else
+        end end,
     {async,FoldFun}.
 
 multi_scan(Scans,#state{ref=Ref,fold_opts=FoldOpts})->
