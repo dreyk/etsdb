@@ -40,7 +40,8 @@
          put_external/4,
          put_external/5,
          get_query/4,
-         scan/3]).
+         scan/3,
+        register_bucket/1]).
 
 -behaviour(riak_core_vnode).
 
@@ -53,6 +54,11 @@
 %%Start vnode
 start_vnode(I) ->
     riak_core_vnode_master:get_vnode_pid(I, etsdb_vnode).
+
+register_bucket(Bucket)->
+    {ok, Ring} = riak_core_ring_manager:get_my_ring(),
+    AllOwners = riak_core_ring:all_owners(Ring),
+    [{riak_core_vnode_master:sync_command(IN,{register,Bucket},etsdb_vnode_master),IN}||IN<-AllOwners].
 
 
 put_internal(ReqID,Preflist,Data)->
@@ -151,6 +157,11 @@ handle_command({clear_db,Bucket}, Sender,
             {noreply, State}
     end;
 
+handle_command({register,Bucket},Sender,State)->
+    lager:info("register ~p",[Bucket]),
+    riak_core_vnode:send_command_after(clear_period(Bucket),{clear_db,Bucket}),
+    riak_core_vnode:reply(Sender,started),
+    {noreply,State};
 %%Receive command to store data in user format.
 handle_command(?ETSDB_STORE_REQ{bucket=Bucket,value=Value,req_id=ReqID}, Sender,
                #state{backend=BackEndModule,backend_ref=BackEndRef,vnode_index=Index}=State)->
