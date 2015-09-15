@@ -181,7 +181,9 @@ handle_command({register,Bucket},Sender,State)->
 %%Receive command to store data in user format.
 handle_command(?ETSDB_DUMP_REQ{bucket=Bucket,param = Param,file = File,req_id=ReqID}, Sender,
     #state{backend=BackEndModule,backend_ref=BackEndRef,vnode_index=Index}=State)->
+    make_dir(File),
     LFile = filename:join([File,integer_to_list(Index)++".dmp"]),
+    lager:info("prepare dump ~p",[{Bucket,Param,LFile}]),
     case BackEndModule:dump_to(self(), Bucket, Param, LFile,BackEndRef) of
         {async, AsyncWork} ->
             Fun =
@@ -349,3 +351,33 @@ do_scan(BackEndModule,BackEndRef,Scans)->
 clear_period(Bucket)->
     I = Bucket:clear_period(),
     I+etsdb_util:random_int(I).
+
+make_dir(undefined)->
+    exit({error,dir_undefined});
+make_dir("undefined"++_)->
+    exit({error,dir_undefined});
+make_dir(Dir) ->
+    case make_safe(Dir) of
+        ok ->
+            ok;
+        {error, enoent} ->
+            S1 = filename:split(Dir),
+            S2 = lists:droplast(S1),
+            case make_dir(filename:join(S2)) of
+                ok ->
+                    make_safe(Dir);
+                Else ->
+                    Else
+            end;
+        Else ->
+            Else
+    end.
+make_safe(Dir)->
+    case file:make_dir(Dir) of
+        ok->
+            ok;
+        {error,eexist}->
+            ok;
+        Else->
+            Else
+    end.

@@ -37,7 +37,7 @@ init([ResultHandler,Bucket,DumpName,Param,Timeout]) ->
     {ok,prepare, #state{result_hadler = ResultHandler,param = Param,bucket=Bucket,timeout=Timeout,dump_name = DumpName},0}.
 
 
-prepare(timeout, #state{}=StateData) ->
+prepare(timeout, #state{bucket = Bucket}=StateData) ->
     {ok, Ring} = riak_core_ring_manager:get_my_ring(),
     AllOwners = riak_core_ring:all_owners(Ring),
     UpNodes = ordsets:from_list(riak_core_node_watcher:nodes(etsdb)),
@@ -46,8 +46,9 @@ prepare(timeout, #state{}=StateData) ->
             true->
                 {[{I,N}|PL],RAcc};
             _->
-                {PL,[{N,down}|RAcc]}
+                {PL,[{{I,N},down}|RAcc]}
         end end,{[],[]},AllOwners),
+    lager:info("prepare dump ~p",[{Bucket,PrefList}]),
     {next_state,execute,StateData#state{preflist=PrefList,results=Res,rcount = length(PrefList)},0}.
 
 execute(timeout, #state{preflist=Preflist,dump_name = File,param = Param,bucket=Bucket,timeout=Timeout}=StateData) ->
