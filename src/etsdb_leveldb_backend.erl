@@ -83,6 +83,7 @@ drop(State) ->
 
 dump_to(Process, Bucket, Param, File, #state{ref = Ref, fold_opts = FoldOpts}) ->
     DumpFun = fun() ->
+        lager:info("create dump ~p",[File]),
         {ok, IO} = file:open(File, [write, binary, raw]),
         {StartKey, Fun, BatchSize} = Bucket:dump_to(IO, Param, ?MODULE),
         dump_to(Ref, FoldOpts, StartKey, Fun, BatchSize, []),
@@ -90,6 +91,7 @@ dump_to(Process, Bucket, Param, File, #state{ref = Ref, fold_opts = FoldOpts}) -
         {ok, RMIO} = file:open(File, [read, binary, raw]),
         drop_dumped(RMIO,Bucket,Process,{0,[]}),
         file:close(RMIO),
+        lager:info("dump ok ~p",[File]),
         {ok,File}
     end,
     {async, DumpFun}.
