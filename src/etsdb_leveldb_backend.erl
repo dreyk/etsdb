@@ -97,7 +97,7 @@ dump_to(Process, Bucket, Param, File, #state{ref = Ref, fold_opts = FoldOpts}) -
     {async, DumpFun}.
 
 drop_dumped(IO,Bucket, Process, Acc) ->
-    case file:read(IO, 5) of
+    case file:read(IO, 13) of
         {ok, <<1:8, _Crc:32, KeySize:32, ValueSize:32>>} ->
             case file:read(IO, KeySize) of
                 {ok, Key} ->
