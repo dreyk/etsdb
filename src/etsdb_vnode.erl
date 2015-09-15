@@ -192,7 +192,7 @@ handle_command(?ETSDB_DUMP_REQ{bucket=Bucket,param = Param,file = File,req_id=Re
         Else->
             riak_core_vnode:reply(Sender, {r,Index,ReqID,Else})
     end,
-    {noreply,State#state};
+    {noreply,State};
 handle_command(?ETSDB_STORE_REQ{bucket=Bucket,value=Value,req_id=ReqID}, Sender,
                #state{backend=BackEndModule,backend_ref=BackEndRef,vnode_index=Index}=State)->
     case BackEndModule:save(Bucket,Value,BackEndRef) of
