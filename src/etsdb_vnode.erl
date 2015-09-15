@@ -41,7 +41,8 @@
          put_external/5,
          get_query/4,
          scan/3,
-        register_bucket/1]).
+        register_bucket/1,
+        dump_to/5]).
 
 -behaviour(riak_core_vnode).
 
@@ -68,6 +69,9 @@ put_external(Caller,ReqID,Preflist,Bucket,Data)->
     riak_core_vnode_master:command(Preflist,#etsdb_store_req_v1{value=Data,req_id=ReqID,bucket=Bucket},{fsm,undefined,Caller},etsdb_vnode_master).
 put_external(ReqID,Preflist,Bucket,Data)->
     riak_core_vnode_master:command(Preflist,#etsdb_store_req_v1{value=Data,req_id=ReqID,bucket=Bucket},{fsm,undefined,self()},etsdb_vnode_master).
+
+dump_to(ReqID,Preflist,Bucket,File,Param)->
+    riak_core_vnode_master:command(Preflist,#etsdb_dump_req_v1{bucket = Bucket,file = File,param = Param,req_id = ReqID},{fsm,undefined,self()},etsdb_vnode_master).
 
 scan(ReqID,Vnode,Scans)->
     riak_core_vnode_master:command([{Vnode,node()}],#etsdb_get_query_req_v1{get_query=Scans,req_id=ReqID,bucket=custom_scan},{fsm,undefined,self()},etsdb_vnode_master).
@@ -113,6 +117,17 @@ handle_handoff_command({clear_db,_}, _Sender, State) ->
 handle_handoff_command(Req, Sender, State) ->
     handle_command(Req, Sender, State).
 
+handle_command({remove_dumped,Bucket,Records}, _Sender,
+    #state{backend=BackEndModule,backend_ref=BackEndRef,vnode_index=Index}=State)->
+    ToDelete = lists:usort(Records),
+    case BackEndModule:delete(Bucket,ToDelete,BackEndRef) of
+        {ok,NewBackEndRef}->
+            ok;
+        {error,Reason,NewBackEndRef}->
+            lager:error("Can't delete dumped records ~p on ~p",[Reason,Index])
+    end,
+    {noreply,State#state{backend_ref=NewBackEndRef}};
+
 handle_command({remove_expired,_,_}, _Sender,
                #state{vnode_index=undefined}=State)->
     {noreply,State};
@@ -136,6 +151,7 @@ handle_command({remove_expired,Bucket,{expired_records,{Count,Records}}}, _Sende
             riak_core_vnode:send_command_after(clear_period(Bucket),{clear_db,Bucket})
     end,
     {noreply,State#state{backend_ref=NewBackEndRef}};
+
 handle_command({remove_expired,Bucket,Error}, _Sender,#state{vnode_index=Index}=State)->
     lager:error("Find expired task failed ~p on ~p",[Error,Index]),
     riak_core_vnode:send_command_after(clear_period(Bucket),{clear_db,Bucket}),
@@ -163,6 +179,20 @@ handle_command({register,Bucket},Sender,State)->
     riak_core_vnode:reply(Sender,started),
     {noreply,State};
 %%Receive command to store data in user format.
+handle_command(?ETSDB_DUMP_REQ{bucket=Bucket,param = Param,file = File,req_id=ReqID}, Sender,
+    #state{backend=BackEndModule,backend_ref=BackEndRef,vnode_index=Index}=State)->
+    LFile = filename:join([File,integer_to_list(Index)++".dmp"]),
+    case BackEndModule:dump_to(self(), Bucket, Param, LFile,BackEndRef) of
+        {async, AsyncWork} ->
+            Fun =
+                fun()->
+                    InvokeRes = AsyncWork(),
+                    {r,{Index,node()},ReqID,InvokeRes} end,
+            {async, {invoke,Fun},Sender, State};
+        Else->
+            riak_core_vnode:reply(Sender, {r,Index,ReqID,Else})
+    end,
+    {noreply,State#state};
 handle_command(?ETSDB_STORE_REQ{bucket=Bucket,value=Value,req_id=ReqID}, Sender,
                #state{backend=BackEndModule,backend_ref=BackEndRef,vnode_index=Index}=State)->
     case BackEndModule:save(Bucket,Value,BackEndRef) of

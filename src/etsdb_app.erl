@@ -27,7 +27,7 @@
 -export([
      start/2,
      stop/1,
-     start_test/0]).
+     start_test/0,dump/4]).
 
 
 -spec start(Type::term(), StartArgs::term())-> {ok,pid()} | ignore | {error,Error::term()}.
@@ -65,3 +65,24 @@ start_test()->
     erlang:spawn(fun()->start_test_inner() end).
 start_test_inner() ->
   ok = etsdb_util:start_app(etsdb).
+
+
+dump(Bucket,Param,To,Timeout)->
+    ReqRef = make_ref(),
+    Me = self(),
+    etsdb_dump_fsm:start_link({raw,ReqRef,Me},Bucket,To,Param,Timeout),
+    wait_for_results(ReqRef,client_wait_timeout(Timeout)).
+
+wait_for_results(ReqRef,Timeout)->
+    receive
+        {ReqRef,Res}->
+            Res;
+        {_OldReqRef,_OldRes}->
+            wait_for_results(ReqRef,Timeout)
+    after Timeout->
+        {error,timeout}
+    end.
+
+%%Add 50ms to operation timeout
+client_wait_timeout(Timeout)->
+    Timeout + 1000.
