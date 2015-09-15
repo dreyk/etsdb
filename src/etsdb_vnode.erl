@@ -184,15 +184,17 @@ handle_command(?ETSDB_DUMP_REQ{bucket=Bucket,param = Param,file = File,req_id=Re
     make_dir(File),
     LFile = filename:join([File,integer_to_list(Index)++".dmp"]),
     lager:info("prepare dump ~p",[{Bucket,Param,LFile}]),
-    case BackEndModule:dump_to(self(), Bucket, Param, LFile,BackEndRef) of
+    case catch BackEndModule:dump_to(self(), Bucket, Param, LFile,BackEndRef) of
         {async, AsyncWork} ->
+            lager:info("aync ~p",[AsyncWork]),
             Fun =
                 fun()->
                     InvokeRes = AsyncWork(),
                     {r,{Index,node()},ReqID,InvokeRes} end,
             {async, {invoke,Fun},Sender, State};
         Else->
-            riak_core_vnode:reply(Sender, {r,Index,ReqID,Else})
+            lager:info("err ~p",[Else]),
+            riak_core_vnode:reply(Sender, {r,{Index,node()},ReqID,Else})
     end,
     {noreply,State};
 handle_command(?ETSDB_STORE_REQ{bucket=Bucket,value=Value,req_id=ReqID}, Sender,
