@@ -115,6 +115,8 @@ drop_dumped(IO,Bucket, Process, Acc) ->
                 {error, Error} ->
                     lager:error("Can't read dump file ~p", [Error])
             end;
+        {ok,_}->
+            lager:error("Can't read dump file");
         eof ->
             add_to_drop(Bucket,Process, '$end', Acc);
         {error, Error} ->
