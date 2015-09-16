@@ -42,7 +42,7 @@
          get_query/4,
          scan/3,
         register_bucket/1,
-        dump_to/5]).
+        dump_to/6]).
 
 -behaviour(riak_core_vnode).
 
@@ -70,8 +70,8 @@ put_external(Caller,ReqID,Preflist,Bucket,Data)->
 put_external(ReqID,Preflist,Bucket,Data)->
     riak_core_vnode_master:command(Preflist,#etsdb_store_req_v1{value=Data,req_id=ReqID,bucket=Bucket},{fsm,undefined,self()},etsdb_vnode_master).
 
-dump_to(ReqID,Preflist,Bucket,File,Param)->
-    riak_core_vnode_master:command(Preflist,#etsdb_dump_req_v1{bucket = Bucket,file = File,param = Param,req_id = ReqID},{fsm,undefined,self()},etsdb_vnode_master).
+dump_to(ReqID,Preflist,Bucket,File,Param,IsDelete)->
+    riak_core_vnode_master:command(Preflist,#etsdb_dump_req_v1{bucket = Bucket,file = File,param = Param,req_id = ReqID,is_delete = IsDelete},{fsm,undefined,self()},etsdb_vnode_master).
 
 scan(ReqID,Vnode,Scans)->
     riak_core_vnode_master:command([{Vnode,node()}],#etsdb_get_query_req_v1{get_query=Scans,req_id=ReqID,bucket=custom_scan},{fsm,undefined,self()},etsdb_vnode_master).
@@ -179,12 +179,12 @@ handle_command({register,Bucket},Sender,State)->
     riak_core_vnode:reply(Sender,started),
     {noreply,State};
 %%Receive command to store data in user format.
-handle_command(?ETSDB_DUMP_REQ{bucket=Bucket,param = Param,file = File,req_id=ReqID}, Sender,
+handle_command(?ETSDB_DUMP_REQ{bucket=Bucket,param = Param,file = File,req_id=ReqID,is_delete=IsDelete}, Sender,
     #state{backend=BackEndModule,backend_ref=BackEndRef,vnode_index=Index}=State)->
     make_dir(File),
     LFile = filename:join([File,integer_to_list(Index)++".dmp"]),
     lager:info("prepare dump ~p",[{Bucket,Param,LFile}]),
-    case catch BackEndModule:dump_to(self(), Bucket, Param, LFile,BackEndRef) of
+    case catch BackEndModule:dump_to(self(), Bucket, Param, LFile,IsDelete,BackEndRef) of
         {async, AsyncWork} ->
             Fun =
                 fun()->

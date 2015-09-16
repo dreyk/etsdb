@@ -3,7 +3,7 @@
 -record(etsdb_innerstore_req_v1,{value,req_id::term()}).
 -record(etsdb_get_cell_req_v1,{bucket::module(),value,filter,req_id::term()}).
 
--record(etsdb_dump_req_v1,{bucket::module(),param::term(),file::file:filename(),req_id::term()}).
+-record(etsdb_dump_req_v1,{bucket::module(),param::term(),file::file:filename(),req_id::term(),is_delete::boolean()}).
 
 -record(etsdb_store_res_v1,{count,error_count,errors}).
 

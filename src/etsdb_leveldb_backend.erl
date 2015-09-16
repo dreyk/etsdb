@@ -42,7 +42,7 @@
     scan/3,
     multi_scan/4,
     multi_scan/2,
-    dump_to/5]).
+    dump_to/6]).
 
 -include("etsdb_request.hrl").
 
@@ -81,66 +81,71 @@ drop(State) ->
             {error, Reason, State}
     end.
 
-dump_to(Process, Bucket, Param, File, #state{ref = Ref, fold_opts = FoldOpts}) ->
+dump_to(Process, Bucket, Param, File, IsDelete, #state{ref = Ref, fold_opts = FoldOpts}) ->
     DumpFun = fun() ->
-        lager:info("create dump ~p",[File]),
+        lager:info("create dump ~p", [File]),
         {ok, IO} = file:open(File, [write, binary, raw]),
         {StartKey, Fun, BatchSize} = Bucket:dump_to(IO, Param, ?MODULE),
         dump_to(Ref, FoldOpts, StartKey, Fun, BatchSize, []),
         file:close(IO),
-        {ok, RMIO} = file:open(File, [read, binary, raw]),
-        drop_dumped(RMIO,Bucket,Process,{0,[]}),
-        file:close(RMIO),
-        lager:info("dump ok ~p",[File]),
-        {ok,File}
+        if
+            IsDelete ->
+                {ok, RMIO} = file:open(File, [read, binary, raw]),
+                drop_dumped(RMIO, Bucket, Process, {0, []}),
+                file:close(RMIO);
+            true ->
+                ok
+        end,
+        lager:info("dump ok ~p", [File]),
+        {ok, File}
     end,
     {async, DumpFun}.
 
-drop_dumped(IO,Bucket, Process, Acc) ->
+drop_dumped(IO, Bucket, Process, Acc) ->
     case file:read(IO, 13) of
         {ok, <<1:8, _Crc:32, KeySize:32, ValueSize:32>>} ->
             case file:read(IO, KeySize) of
                 {ok, Key} ->
-                    Acc1 = add_to_drop(Bucket,Process, Key, Acc),
+                    Acc1 = add_to_drop(Bucket, Process, Key, Acc),
                     case file:position(IO, {cur, ValueSize}) of
                         {ok, _} ->
-                            drop_dumped(IO,Bucket, Process, Acc1);
+                            drop_dumped(IO, Bucket, Process, Acc1);
                         eof ->
-                            add_to_drop(Bucket,Process, '$end', Acc);
+                            add_to_drop(Bucket, Process, '$end', Acc);
                         {error, Error} ->
                             lager:error("Can't read dump file ~p", [Error])
                     end;
                 eof ->
-                    add_to_drop(Bucket,Process, '$end', Acc);
+                    add_to_drop(Bucket, Process, '$end', Acc);
                 {error, Error} ->
                     lager:error("Can't read dump file ~p", [Error])
             end;
-        {ok,_}->
+        {ok, _} ->
             lager:error("Can't read dump file");
         eof ->
-            add_to_drop(Bucket,Process, '$end', Acc);
+            add_to_drop(Bucket, Process, '$end', Acc);
         {error, Error} ->
             lager:error("Can't read dump file ~p", [Error])
 
     end.
 
-add_to_drop(Bucket,Process,'$end', Acc)->
+add_to_drop(Bucket, Process, '$end', Acc) ->
     case Acc of
-        {0,_}->
-            {0,[]};
-        {_,Keys}->
-            lager:info("remove ~p keys from ~p",[length(Keys),Bucket]),
-            riak_core_vnode:send_command(Process,{remove_dumped,Bucket,Keys}),
-            {0,[]}
+        {0, _} ->
+            {0, []};
+        {_, Keys} ->
+            lager:info("remove ~p keys from ~p", [length(Keys), Bucket]),
+            riak_core_vnode:send_command(Process, {remove_dumped, Bucket, Keys}),
+            {0, []}
     end;
-add_to_drop(Bucket,Process,K, Acc)->
+add_to_drop(Bucket, Process, K, Acc) ->
     case Acc of
-        {I,Keys} when I<1000->
-            {I+1,[K|Keys]};
-        {_,Keys}->
-            lager:info("remove ~p keys from ~p",[length(Keys),Bucket]),
-            riak_core_vnode:send_command(Process,{remove_dumped,Bucket,Keys}),
-            {0,[]}
+        {I, Keys} when I < 1000 ->
+            {I + 1, [K | Keys]};
+        {_, Keys} ->
+            lager:info("remove ~p keys from ~p", [length(Keys), Bucket]),
+            riak_core_vnode:send_command(Process, {remove_dumped, Bucket, Keys}),
+            {0, []}
     end.
 
 dump_to(Ref, FoldOpts, StartIterate, Fun, BatchSize, Acc) ->

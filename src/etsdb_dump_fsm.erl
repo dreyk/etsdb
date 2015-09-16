@@ -22,16 +22,16 @@
 
 -behaviour(gen_fsm).
 
--export([start_link/5]).
+-export([start_link/6]).
 
 
 -export([init/1, execute/2,wait_result/2,prepare/2, handle_event/3,
     handle_sync_event/4, handle_info/3, terminate/3, code_change/4]).
 
--record(state, {result_hadler,preflist,param,dump_name,timeout,bucket,results,rcount,req_ref}).
+-record(state, {result_hadler,preflist,param,dump_name,timeout,bucket,results,rcount,is_delete,req_ref}).
 
-start_link(ResultHandler,Bucket,DumpName,Param,Timeout) ->
-    gen_fsm:start_link(?MODULE, [ResultHandler,Bucket,DumpName,Param,Timeout], []).
+start_link(ResultHandler,Bucket,DumpName,Param,IsDelete,Timeout) ->
+    gen_fsm:start_link(?MODULE, [ResultHandler,Bucket,DumpName,Param,IsDelete,Timeout], []).
 
 init([ResultHandler,Bucket,DumpName,Param,Timeout]) ->
     {ok,prepare, #state{result_hadler = ResultHandler,param = Param,bucket=Bucket,timeout=Timeout,dump_name = DumpName},0}.
@@ -51,23 +51,26 @@ prepare(timeout, #state{bucket = Bucket}=StateData) ->
     lager:info("prepare dump ~p",[{Bucket,PrefList}]),
     {next_state,execute,StateData#state{preflist=PrefList,results=Res,rcount = length(PrefList)},0}.
 
-execute(timeout, #state{preflist=Preflist,dump_name = File,param = Param,bucket=Bucket,timeout=Timeout}=StateData) ->
+execute(timeout, #state{preflist=Preflist,dump_name = File,param = Param,bucket=Bucket,timeout=Timeout,is_delete = IsDelete}=StateData) ->
     Ref = make_ref(),
-    etsdb_vnode:dump_to(Ref,Preflist,Bucket,File,Param),
+    etsdb_vnode:dump_to(Ref,Preflist,Bucket,File,Param,IsDelete),
     {next_state,wait_result, StateData#state{req_ref=Ref},Timeout}.
 
 
-wait_result({r,VNode,ReqID,InvokeRes},#state{result_hadler = ResaultHandler,results=Results,req_ref=ReqID,timeout=Timeout,rcount = C1}=StateData) ->
+wait_result({r,VNode,ReqID,InvokeRes},#state{preflist = Pref,result_hadler = ResaultHandler,results=Results,req_ref=ReqID,timeout=Timeout,rcount = C1}=StateData) ->
     C2 = C1-1,
     if
         C2==0->
             reply_to_caller(ResaultHandler,[{VNode,InvokeRes}|Results]),
             {stop,normal,StateData};
         true->
-            {next_state,wait_result, StateData#state{results=[{VNode,InvokeRes}|Results],rcount = C2},Timeout}
+            Pref1 = lists:delete(VNode,Pref),
+            {next_state,wait_result, StateData#state{preflist = Pref1,results=[{VNode,InvokeRes}|Results],rcount = C2},Timeout}
     end;
-wait_result(timeout,#state{result_hadler = ResaultHandler}=StateData) ->
-    reply_to_caller(ResaultHandler,{error,timeout}),
+wait_result(timeout,#state{result_hadler = ResaultHandler,results = R1,preflist = Pref}=StateData) ->
+    R2 = lists:foldl(fun(V,Acc)->
+        [{V,{error,timeout}}|Acc] end,R1,Pref),
+    reply_to_caller(ResaultHandler,R2),
     {stop,normal,StateData}.
 
 
