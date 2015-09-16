@@ -86,7 +86,7 @@ dump_to(Process, Bucket, Param, File, IsDelete, #state{ref = Ref, fold_opts = Fo
         lager:info("create dump ~p", [File]),
         {ok, IO} = file:open(File, [write, binary, raw]),
         {StartKey, Fun, BatchSize} = Bucket:dump_to(IO, Param, ?MODULE),
-        dump_to(Ref, FoldOpts, StartKey, Fun, BatchSize, []),
+        dump_to_file(Ref, FoldOpts, StartKey, Fun, BatchSize, []),
         file:close(IO),
         if
             IsDelete ->
@@ -148,12 +148,12 @@ add_to_drop(Bucket, Process, K, Acc) ->
             {0, []}
     end.
 
-dump_to(Ref, FoldOpts, StartIterate, Fun, BatchSize, Acc) ->
+dump_to_file(Ref, FoldOpts, StartIterate, Fun, BatchSize, Acc) ->
     try
         eleveldb:fold(Ref, Fun, Acc, [{first_key, StartIterate} | FoldOpts])
     catch
         {coninue, {NextKey, NextFun, ConitnueAcc}} ->
-            dump_to(Ref, FoldOpts, NextKey, NextFun, BatchSize, ConitnueAcc);
+            dump_to_file(Ref, FoldOpts, NextKey, NextFun, BatchSize, ConitnueAcc);
         {break, AccFinal} ->
             AccFinal
     end.
