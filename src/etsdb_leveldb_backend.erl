@@ -22,19 +22,27 @@
 -module(etsdb_leveldb_backend).
 
 -record(state, {ref :: reference(),
-                data_root :: string(),
-                open_opts = [],
-                config,
-                read_opts = [],
-                write_opts = [],
-                fold_opts = [{fill_cache, false}]
-               }).
+    data_root :: string(),
+    open_opts = [],
+    config,
+    read_opts = [],
+    write_opts = [],
+    fold_opts = [{fill_cache, false}]
+}).
 
 -export([init/2,
-         save/3,
-         scan/5,
-         find_expired/2,
-         delete/3,stop/1,drop/1,fold_objects/3,is_empty/1,scan/3,multi_scan/4,multi_scan/2]).
+    save/3,
+    scan/5,
+    find_expired/2,
+    delete/3,
+    stop/1,
+    drop/1,
+    fold_objects/3,
+    is_empty/1,
+    scan/3,
+    multi_scan/4,
+    multi_scan/2,
+    dump_to/6]).
 
 -include("etsdb_request.hrl").
 
@@ -44,7 +52,7 @@ init(Partition, Config) ->
 
     %% Get the data root directory
     DataDir = filename:join(app_helper:get_prop_or_env(data_root, Config, eleveldb),
-                            integer_to_list(Partition)),
+        integer_to_list(Partition)),
 
     %% Initialize state
     S0 = init_state(DataDir, Config),
@@ -73,127 +81,209 @@ drop(State) ->
             {error, Reason, State}
     end.
 
-save(_Bucket,Data,#state{ref=Ref,write_opts=WriteOpts}=State) ->
-    Updates = [{put,Key, Val}||{Key,Val}<-Data],
-    case eleveldb:write(Ref, Updates,WriteOpts) of
+dump_to(Process, Bucket, Param, File, IsDelete, #state{ref = Ref, fold_opts = FoldOpts}) ->
+    DumpFun = fun() ->
+        lager:info("create dump ~p", [File]),
+        {ok, IO} = file:open(File, [write, binary, raw]),
+        {StartKey, Fun, BatchSize} = Bucket:dump_to(IO, Param, ?MODULE),
+        dump_to_file(Ref, FoldOpts, StartKey, Fun, BatchSize, []),
+        file:close(IO),
+        if
+            IsDelete ->
+                {ok, RMIO} = file:open(File, [read, binary, raw]),
+                drop_dumped(RMIO, Bucket, Process, {0, []}),
+                file:close(RMIO);
+            true ->
+                ok
+        end,
+        lager:info("dump ok ~p", [File]),
+        {ok, File}
+    end,
+    {async, DumpFun}.
+
+drop_dumped(IO, Bucket, Process, Acc) ->
+    case file:read(IO, 13) of
+        {ok, <<1:8, _Crc:32, KeySize:32, ValueSize:32>>} ->
+            case file:read(IO, KeySize) of
+                {ok, Key} ->
+                    Acc1 = add_to_drop(Bucket, Process, Key, Acc),
+                    case file:position(IO, {cur, ValueSize}) of
+                        {ok, _} ->
+                            drop_dumped(IO, Bucket, Process, Acc1);
+                        eof ->
+                            add_to_drop(Bucket, Process, '$end', Acc);
+                        {error, Error} ->
+                            lager:error("Can't read dump file ~p", [Error])
+                    end;
+                eof ->
+                    add_to_drop(Bucket, Process, '$end', Acc);
+                {error, Error} ->
+                    lager:error("Can't read dump file ~p", [Error])
+            end;
+        {ok, _} ->
+            lager:error("Can't read dump file");
+        eof ->
+            add_to_drop(Bucket, Process, '$end', Acc);
+        {error, Error} ->
+            lager:error("Can't read dump file ~p", [Error])
+
+    end.
+
+add_to_drop(Bucket, Process, '$end', Acc) ->
+    case Acc of
+        {0, _} ->
+            {0, []};
+        {_, Keys} ->
+            lager:info("remove ~p keys from ~p", [length(Keys), Bucket]),
+            riak_core_vnode:send_command(Process, {remove_dumped, Bucket, Keys}),
+            {0, []}
+    end;
+add_to_drop(Bucket, Process, K, Acc) ->
+    case Acc of
+        {I, Keys} when I < 1000 ->
+            {I + 1, [K | Keys]};
+        {_, Keys} ->
+            lager:info("remove ~p keys from ~p", [length(Keys), Bucket]),
+            riak_core_vnode:send_command(Process, {remove_dumped, Bucket, Keys}),
+            {0, []}
+    end.
+
+dump_to_file(Ref, FoldOpts, StartIterate, Fun, BatchSize, Acc) ->
+    try
+        eleveldb:fold(Ref, Fun, Acc, [{first_key, StartIterate} | FoldOpts])
+    catch
+        {coninue, {NextKey, NextFun, ConitnueAcc}} ->
+            dump_to_file(Ref, FoldOpts, NextKey, NextFun, BatchSize, ConitnueAcc);
+        {break, AccFinal} ->
+            AccFinal
+    end.
+
+save(_Bucket, Data, #state{ref = Ref, write_opts = WriteOpts} = State) ->
+    Updates = [{put, Key, Val} || {Key, Val} <- Data],
+    case eleveldb:write(Ref, Updates, WriteOpts) of
         ok ->
             {ok, State};
         {error, Reason} ->
             {error, Reason, State}
     end.
-find_expired(Bucket,#state{ref=Ref,fold_opts=FoldOpts})->
-    {StartIterate,Fun} = Bucket:expire_spec(?MODULE),
+find_expired(Bucket, #state{ref = Ref, fold_opts = FoldOpts}) ->
+    {StartIterate, Fun, BatchSize, Patterns} = case Bucket:expire_spec(?MODULE) of
+                                                   {T1, T2, T3, T4} ->
+                                                       {T1, T2, T3, T4};
+                                                   {T1, T2, T3} ->
+                                                       {T1, T2, T3, undefined};
+                                                   {T1, T2} ->
+                                                       {T1, T2, 1, undefined}
+                                               end,
     FoldFun = fun() ->
-                try
-                    FoldResult = eleveldb:fold(Ref,Fun,{0,[]}, [{first_key,StartIterate} | FoldOpts]),
-                    {expired_records,FoldResult}
-                catch
-                    {break, AccFinal} ->
-                        {expired_records,AccFinal}
-                end
-        end,
-    {async,FoldFun}.
+        case multi_fold(direct, Ref, FoldOpts, StartIterate, Fun, BatchSize, {0, []}, Patterns) of
+            {ok, R} ->
+                {expired_records, R};
+            Else ->
+                Else
+        end end,
+    {async, FoldFun}.
 
-multi_scan(Scans,#state{ref=Ref,fold_opts=FoldOpts})->
-    multi_scan(Scans,Ref, FoldOpts,[]).
-scan(Scans,Acc,#state{ref=Ref,fold_opts=FoldOpts})->
+multi_scan(Scans, #state{ref = Ref, fold_opts = FoldOpts}) ->
+    multi_scan(Scans, Ref, FoldOpts, []).
+scan(Scans, Acc, #state{ref = Ref, fold_opts = FoldOpts}) ->
     FoldFun = fun() ->
-                      multi_scan(Scans,Ref, FoldOpts, Acc) end,
-    {async,FoldFun}.
+        multi_scan(Scans, Ref, FoldOpts, Acc) end,
+    {async, FoldFun}.
 
-custom_scan_spec({M,F,A})->
-    apply(M,F,A++[?MODULE]);
-custom_scan_spec(Fun)->
+custom_scan_spec({M, F, A}) ->
+    apply(M, F, A ++ [?MODULE]);
+custom_scan_spec(Fun) ->
     Fun(?MODULE).
 
-scan(Bucket,From,To,Acc,#state{ref=Ref,fold_opts=FoldOpts})->
-    {StartIterate,Fun,BatchSize, Patterns} = case Bucket:scan_spec(From,To,?MODULE) of
-                                       {T1, T2, T3, T4} ->
-                                           {T1, T2, T3, T4};
-                                       {T1,T2,T3}->
-                                           {T1,T2,T3, undefined};
-                                       {T1,T2}->
-                                           {T1,T2,1, undefined}
-                                   end,
+scan(Bucket, From, To, Acc, #state{ref = Ref, fold_opts = FoldOpts}) ->
+    {StartIterate, Fun, BatchSize, Patterns} = case Bucket:scan_spec(From, To, ?MODULE) of
+                                                   {T1, T2, T3, T4} ->
+                                                       {T1, T2, T3, T4};
+                                                   {T1, T2, T3} ->
+                                                       {T1, T2, T3, undefined};
+                                                   {T1, T2} ->
+                                                       {T1, T2, 1, undefined}
+                                               end,
     FoldFun = fun() ->
-                      multi_fold(reverse,Ref, FoldOpts, StartIterate, Fun,BatchSize,Acc, Patterns) end,
-    {async,FoldFun}.
+        multi_fold(reverse, Ref, FoldOpts, StartIterate, Fun, BatchSize, Acc, Patterns) end,
+    {async, FoldFun}.
 
-multi_scan([],_Ref,_FoldOpts,Acc)->
-    {ok,Acc};
-multi_scan([Scan|Scans],Ref,FoldOpts,Acc)->
-    {StartIterate,Fun,BatchSize, Patterns} = case custom_scan_spec(Scan#pscan_req.function) of
-                             {T1, T2, T3, T4} ->
-                                 {T1, T2, T3, T4};
-                             {T1,T2,T3}->
-                                 {T1,T2,T3, undefined};
-                             {T1,T2}->
-                                 {T1,T2,1, undefined}
-                         end,
+multi_scan([], _Ref, _FoldOpts, Acc) ->
+    {ok, Acc};
+multi_scan([Scan | Scans], Ref, FoldOpts, Acc) ->
+    {StartIterate, Fun, BatchSize, Patterns} = case custom_scan_spec(Scan#pscan_req.function) of
+                                                   {T1, T2, T3, T4} ->
+                                                       {T1, T2, T3, T4};
+                                                   {T1, T2, T3} ->
+                                                       {T1, T2, T3, undefined};
+                                                   {T1, T2} ->
+                                                       {T1, T2, 1, undefined}
+                                               end,
     ExtFoldOpts = [{catch_end_of_data, Scan#pscan_req.catch_end_of_data} | FoldOpts],
-    case multi_fold(native,Ref,ExtFoldOpts,StartIterate,Fun,BatchSize,Acc, Patterns) of
-        {ok,Acc1}->
-            multi_scan(Scans,Ref,FoldOpts,Acc1);
-        Error->
+    case multi_fold(native, Ref, ExtFoldOpts, StartIterate, Fun, BatchSize, Acc, Patterns) of
+        {ok, Acc1} ->
+            multi_scan(Scans, Ref, FoldOpts, Acc1);
+        Error ->
             Error
     end.
 
-catch_end_of_data(false, _, Acc, _, _, _, _,_) ->
+catch_end_of_data(false, _, Acc, _, _, _, _, _) ->
     Acc;
 catch_end_of_data(true, Fun, Acc, Order, Ref, FoldOpts, BatchSize, _OldPatterns) ->
     case Fun('end_of_data', Acc) of
         {'next_key', KeyNext, FunNext, Patterns, NewAcc} ->
             {ok, R} = multi_fold(Order, Ref, FoldOpts, KeyNext, FunNext, BatchSize, NewAcc, Patterns),
             R;
-        {coninue,{KeyNext, FunNext, Patterns, NewAcc}} ->
-            {ok, R} = multi_fold(Order,Ref, FoldOpts,KeyNext,FunNext,BatchSize,NewAcc, Patterns),
+        {coninue, {KeyNext, FunNext, Patterns, NewAcc}} ->
+            {ok, R} = multi_fold(Order, Ref, FoldOpts, KeyNext, FunNext, BatchSize, NewAcc, Patterns),
             R;
         SomeAcc ->
             SomeAcc
     end.
 
-multi_fold(Order,Ref,FoldOpts,StartIterate,Fun,BatchSize, Acc, Patterns)->
+multi_fold(Order, Ref, FoldOpts, StartIterate, Fun, BatchSize, Acc, Patterns) ->
     try
-        FoldResult0 = case BatchSize>1 of
-                          true->
-                              eleveldb:fold_pattern(Ref,Fun,Acc, [{first_key,StartIterate} | FoldOpts],BatchSize, Patterns);
-                          _->
-                              eleveldb:fold(Ref,Fun,Acc,[{first_key,StartIterate} | FoldOpts])
-                             end,
+        FoldResult0 = case BatchSize > 1 of
+                          true ->
+                              eleveldb:fold_pattern(Ref, Fun, Acc, [{first_key, StartIterate} | FoldOpts], BatchSize, Patterns);
+                          _ ->
+                              eleveldb:fold(Ref, Fun, Acc, [{first_key, StartIterate} | FoldOpts])
+                      end,
         CatchEOD = etsdb_util:propfind(catch_end_of_data, FoldOpts, false),
         FoldResult = catch_end_of_data(CatchEOD, Fun, FoldResult0, Order, Ref, FoldOpts, BatchSize, Patterns),
         if
-            Order==reverse->
-                {ok,lists:reverse(FoldResult)};
-            true->
-                {ok,FoldResult}
+            Order == reverse ->
+                {ok, lists:reverse(FoldResult)};
+            true ->
+                {ok, FoldResult}
         end
     catch
-        {coninue,{NextKey,NextFun,ConitnueAcc}} ->
-            multi_fold(Order,Ref, FoldOpts,NextKey,NextFun,BatchSize,ConitnueAcc, undefined);
-        {coninue,{NextKey,NextFun,ConitnueAcc, Patterns}} ->
-            multi_fold(Order,Ref, FoldOpts,NextKey,NextFun,BatchSize,ConitnueAcc, Patterns);
+        {coninue, {NextKey, NextFun, ConitnueAcc}} ->
+            multi_fold(Order, Ref, FoldOpts, NextKey, NextFun, BatchSize, ConitnueAcc, undefined);
+        {coninue, {NextKey, NextFun, ConitnueAcc, Patterns}} ->
+            multi_fold(Order, Ref, FoldOpts, NextKey, NextFun, BatchSize, ConitnueAcc, Patterns);
         {break, AccFinal} ->
             if
-                Order==reverse->
-                    {ok,lists:reverse(AccFinal)};
-                true->
-                    {ok,AccFinal}
+                Order == reverse ->
+                    {ok, lists:reverse(AccFinal)};
+                true ->
+                    {ok, AccFinal}
             end
     end.
 
-is_empty(#state{ref=Ref}) ->
-   eleveldb:is_empty(Ref).
+is_empty(#state{ref = Ref}) ->
+    eleveldb:is_empty(Ref).
 
-fold_objects(FoldObjectsFun, Acc, #state{fold_opts=FoldOpts,ref=Ref}) ->  
+fold_objects(FoldObjectsFun, Acc, #state{fold_opts = FoldOpts, ref = Ref}) ->
     FoldFun = fun({StorageKey, Value}, Acc1) ->
-                      try
-                          FoldObjectsFun(StorageKey, Value, Acc1)
-                      catch
-                          stop_fold->
-                                  throw({break, Acc1})
-                        end
-                end,
+        try
+            FoldObjectsFun(StorageKey, Value, Acc1)
+        catch
+            stop_fold ->
+                throw({break, Acc1})
+        end
+    end,
     ObjectFolder =
         fun() ->
             try
@@ -205,9 +295,9 @@ fold_objects(FoldObjectsFun, Acc, #state{fold_opts=FoldOpts,ref=Ref}) ->
         end,
     {async, ObjectFolder}.
 
-delete(_,Data,#state{ref=Ref,write_opts=WriteOpts}=State)->
-    Updates = [{delete, StorageKey}||StorageKey<-Data],
-    case eleveldb:write(Ref, Updates,WriteOpts) of
+delete(_, Data, #state{ref = Ref, write_opts = WriteOpts} = State) ->
+    Updates = [{delete, StorageKey} || StorageKey <- Data],
+    case eleveldb:write(Ref, Updates, WriteOpts) of
         ok ->
             {ok, State};
         {error, Reason} ->
@@ -220,8 +310,8 @@ init_state(DataRoot, Config) ->
     %% Merge the proplist passed in from Config with any values specified by the
     %% eleveldb app level; precedence is given to the Config.
     MergedConfig = orddict:merge(fun(_K, VLocal, _VGlobal) -> VLocal end,
-                                 orddict:from_list(Config), % Local
-                                 orddict:from_list(application:get_all_env(eleveldb))), % Global
+        orddict:from_list(Config), % Local
+        orddict:from_list(application:get_all_env(eleveldb))), % Global
 
     %% Use a variable write buffer size in order to reduce the number
     %% of vnodes that try to kick off compaction at the same time
@@ -233,7 +323,7 @@ init_state(DataRoot, Config) ->
     %% Update the write buffer size in the merged config and make sure create_if_missing is set
     %% to true
     FinalConfig = orddict:store(write_buffer_size, WriteBufferSize,
-                                orddict:store(create_if_missing, true, MergedConfig)),
+        orddict:store(create_if_missing, true, MergedConfig)),
 
     %% Parse out the open/read/write options
     {OpenOpts, _BadOpenOpts} = eleveldb:validate_options(open, FinalConfig),
@@ -249,24 +339,24 @@ init_state(DataRoot, Config) ->
     case BS /= false andalso SSTBS == false of
         true ->
             lager:warning("eleveldb block_size has been renamed sst_block_size "
-                          "and the current setting of ~p is being ignored.  "
-                          "Changing sst_block_size is strongly cautioned "
-                          "against unless you know what you are doing.  Remove "
-                          "block_size from app.config to get rid of this "
-                          "message.\n", [BS]);
+            "and the current setting of ~p is being ignored.  "
+            "Changing sst_block_size is strongly cautioned "
+            "against unless you know what you are doing.  Remove "
+            "block_size from app.config to get rid of this "
+            "message.\n", [BS]);
         _ ->
             ok
     end,
 
     %% Generate a debug message with the options we'll use for each operation
     lager:debug("Datadir ~s options for LevelDB: ~p\n",
-                [DataRoot, [{open, OpenOpts}, {read, ReadOpts}, {write, WriteOpts}, {fold, FoldOpts}]]),
-    #state { data_root = DataRoot,
-             open_opts = OpenOpts,
-             read_opts = ReadOpts,
-             write_opts = WriteOpts,
-             fold_opts = FoldOpts,
-             config = FinalConfig }.
+        [DataRoot, [{open, OpenOpts}, {read, ReadOpts}, {write, WriteOpts}, {fold, FoldOpts}]]),
+    #state{data_root = DataRoot,
+        open_opts = OpenOpts,
+        read_opts = ReadOpts,
+        write_opts = WriteOpts,
+        fold_opts = FoldOpts,
+        config = FinalConfig}.
 
 open_db(State) ->
     RetriesLeft = app_helper:get_env(riak_kv, eleveldb_open_retries, 30),
@@ -277,17 +367,17 @@ open_db(_State0, 0, LastError) ->
 open_db(State0, RetriesLeft, _) ->
     case eleveldb:open(State0#state.data_root, State0#state.open_opts) of
         {ok, Ref} ->
-            {ok, State0#state { ref = Ref }};
-        %% Check specifically for lock error, this can be caused if
-        %% a crashed vnode takes some time to flush leveldb information
-        %% out to disk.  The process is gone, but the NIF resource cleanup
-        %% may not have completed.
-        {error, {db_open, OpenErr}=Reason} ->
+            {ok, State0#state{ref = Ref}};
+    %% Check specifically for lock error, this can be caused if
+    %% a crashed vnode takes some time to flush leveldb information
+    %% out to disk.  The process is gone, but the NIF resource cleanup
+    %% may not have completed.
+        {error, {db_open, OpenErr} = Reason} ->
             case lists:prefix("IO error: lock ", OpenErr) of
                 true ->
                     SleepFor = app_helper:get_env(riak_kv, eleveldb_open_retry_delay, 2000),
                     lager:debug("Leveldb backend retrying ~p in ~p ms after error ~s\n",
-                                [State0#state.data_root, SleepFor, OpenErr]),
+                        [State0#state.data_root, SleepFor, OpenErr]),
                     timer:sleep(SleepFor),
                     open_db(State0, RetriesLeft - 1, Reason);
                 false ->
