@@ -40,7 +40,9 @@
          put_external/4,
          put_external/5,
          get_query/4,
-         scan/3]).
+         scan/3,
+         expire/2,
+        start_expire/1]).
 
 -behaviour(riak_core_vnode).
 
@@ -54,6 +56,24 @@
 start_vnode(I) ->
     riak_core_vnode_master:get_vnode_pid(I, etsdb_vnode).
 
+start_expire(Bucket)->
+    {ok, Ring} = riak_core_ring_manager:get_my_ring(),
+    AllOwners = riak_core_ring:all_owners(Ring),
+    expire(AllOwners,Bucket),
+    collect_expire(length(AllOwners),[]).
+
+collect_expire(0,Acc)->
+    Acc;
+collect_expire(N,Acc)->
+    receive
+        R->
+            collect_expire(N-1,[R|Acc])
+        after 10000->
+            {timeout,Acc}
+    end.
+
+expire(Preflist,Bucket)->
+    riak_core_vnode_master:command(Preflist,{start_expire,Bucket},{fsm,undefined,self()},etsdb_vnode_master).
 
 put_internal(ReqID,Preflist,Data)->
     riak_core_vnode_master:command(Preflist,#etsdb_innerstore_req_v1{value=Data,req_id=ReqID},{fsm,undefined,self()},etsdb_vnode_master).
@@ -147,6 +167,10 @@ handle_command({clear_db,Bucket}, Sender,
     end;
 
 %%Receive command to store data in user format.
+handle_command({start_expire,Bucket}, Sender,State)->
+    start_clear_buckets([Bucket]),
+    riak_core_vnode:reply(Sender, {ok,Bucket}),
+    {noreply,State};
 handle_command(?ETSDB_STORE_REQ{bucket=Bucket,value=Value,req_id=ReqID}, Sender,
                #state{backend=BackEndModule,backend_ref=BackEndRef,vnode_index=Index}=State)->
     case BackEndModule:save(Bucket,Value,BackEndRef) of
