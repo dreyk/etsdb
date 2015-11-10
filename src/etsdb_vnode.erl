@@ -141,6 +141,7 @@ handle_command({remove_expired, Bucket, {expired_records, {0, _Records}}}, _Send
 handle_command({remove_expired, Bucket, {expired_records, {Count, Records}}}, _Sender,
     #state{backend = BackEndModule, backend_ref = BackEndRef, vnode_index = Index} = State) ->
     ToDelete = lists:usort(Records),
+    lager:info("remove epired ~p - ~p",[Bucket,Count]),
     case BackEndModule:delete(Bucket, ToDelete, BackEndRef) of
         {ok, NewBackEndRef} ->
             ok;
@@ -149,7 +150,7 @@ handle_command({remove_expired, Bucket, {expired_records, {Count, Records}}}, _S
     end,
     case Count of
         {continue, _} ->
-            riak_core_vnode:send_command_after(1000, {clear_db, Bucket});
+            riak_core_vnode:send_command_after(10000, {clear_db, Bucket});
         _ ->
             riak_core_vnode:send_command_after(clear_period(Bucket), {clear_db, Bucket})
     end,
