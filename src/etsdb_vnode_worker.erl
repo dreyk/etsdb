@@ -39,6 +39,10 @@ handle_work({invoke,Fun}, Sender, State) ->
             {reply,Res,State}
     end;
 
+handle_work({stream,{Ref,Receiver},Fun}, _Sender, State) ->
+    Res = Fun(),
+    Receiver ! {Ref,{done,Res}},
+    {noreply,State};
 handle_work({scan,Fun}, Sender, State) ->
     Res = Fun(),
     case Sender of

@@ -4,22 +4,24 @@
 -module(etsdb_scan_master_fsm).
 -behaviour(gen_fsm).
 
--export([start_link/3,join_data/3]).
+-export([start_link/3,start_link/4,join_data/3]).
 
 
 -export([init/1, prepare/2,execute/2,wait_result/2, handle_event/3,
      handle_sync_event/4, handle_info/3, terminate/3, code_change/4]).
 
 -record(ack,{num_ok=0,num_fail=0,ok_quorum=0,fail_quorum=0}).
--record(state, {caller,scan_req,local_scaners,timeout,req_ref,ack_data,data}).
+-record(state, {caller,scan_req,local_scaners,timeout,req_ref,ack_data,data,stream}).
 
 -include("etsdb_request.hrl").
 
 start_link(Caller,ScanReq,Timeout) ->
-    gen_fsm:start_link(?MODULE, [Caller,ScanReq,Timeout], []).
+    start_link(Caller,ScanReq,undefined,Timeout).
+start_link(Caller,ScanReq,Stream,Timeout) ->
+    gen_fsm:start_link(?MODULE, [Caller,ScanReq,Stream,Timeout], []).
 
-init([Caller,ScanReq,Timeout]) ->
-    {ok,prepare, #state{caller=Caller,scan_req=ScanReq,timeout=Timeout},0}.
+init([Caller,ScanReq,Stream,Timeout]) ->
+    {ok,prepare, #state{caller=Caller,scan_req=ScanReq,timeout=Timeout,stream = Stream},0}.
 
 
 prepare(timeout, #state{caller=Caller,scan_req=ScanReq}=StateData) ->
@@ -95,9 +97,9 @@ merge_req_by_node('$end',Acc)->
 merge_req_by_node(Data,Acc)->
     [Data|Acc].
 
-execute(timeout, #state{local_scaners=ToScan,scan_req=ScanReq,timeout=Timeout,caller=Caller}=StateData) ->
+execute(timeout, #state{local_scaners=ToScan,scan_req=ScanReq,timeout=Timeout,caller=Caller,stream = Stream}=StateData) ->
     Ref = make_ref(),
-    case start_local_fsm(ToScan,Ref,ScanReq#scan_req{pscan=undefined},Timeout,[]) of
+    case start_local_fsm(ToScan,Ref,ScanReq#scan_req{pscan=undefined},Stream,Timeout,[]) of
         {error,Error,Started}->
             reply_to_caller(Caller,{error,Error}),
             stop_started(Started),
@@ -106,14 +108,14 @@ execute(timeout, #state{local_scaners=ToScan,scan_req=ScanReq,timeout=Timeout,ca
             {next_state,wait_result, StateData#state{req_ref=Ref,local_scaners=Started,data=[]},Timeout}
     end.
 
-start_local_fsm([],_Ref,_ScanReq,_Timeout,Monitors)->
+start_local_fsm([],_Ref,_ScanReq,_Stream,_Timeout,Monitors)->
     Monitors;
-start_local_fsm([{Node,Requests}|Tail],Ref,ScanReq,Timeout,Monitors)->
+start_local_fsm([{Node,Requests}|Tail],Ref,ScanReq,Stream,Timeout,Monitors)->
     case etsdb_scan_local_fsm:start(Ref,Node) of
         {ok,Pid}->
              MRef = erlang:monitor(process,Pid),
-             etsdb_scan_local_fsm:ack(Pid,ScanReq#scan_req{pscan=Requests},Timeout),
-             start_local_fsm(Tail,Ref,ScanReq,Timeout,[{MRef,Pid}|Monitors]);
+             etsdb_scan_local_fsm:ack(Pid,ScanReq#scan_req{pscan=Requests},Stream,Timeout),
+             start_local_fsm(Tail,Ref,ScanReq,Stream,Timeout,[{MRef,Pid}|Monitors]);
         Else->
             lager:error("Can't start local scan on ~p reason ~p",[Node,Else]),
             {error,insufficient_nodes,Monitors}

@@ -10,12 +10,17 @@
 %%
 %% Exported Functions
 %%
--export([scan/2]).
+-export([scan/2,stream/3]).
 
+stream(Stream,ScanReq,Timeout)->
+    exec(Stream,ScanReq,Timeout).
 scan(ScanReq,Timeout)->
+    exec(undefined,ScanReq,Timeout).
+
+exec(Stream,ScanReq,Timeout)->
     ReqRef = make_ref(),
     Me = self(),
-    etsdb_scan_master_fsm:start_link({raw,ReqRef,Me}, ScanReq, Timeout),
+    etsdb_scan_master_fsm:start_link({raw,ReqRef,Me}, ScanReq,Stream,Timeout),
     case wait_for_results(ReqRef,client_wait_timeout(Timeout)) of
         {ok,Res} when is_list(Res)->
             {ok,Res};

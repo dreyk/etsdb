@@ -43,7 +43,8 @@
     scan/3,
     register_bucket/1,
     dump_to/6,
-    delete_records/4]).
+    delete_records/4,
+    stream/4]).
 
 -behaviour(riak_core_vnode).
 
@@ -76,6 +77,8 @@ delete_records(ReqID,Preflist,Bucket,Records)->
 dump_to(ReqID, Preflist, Bucket, File, Param, IsDelete) ->
     riak_core_vnode_master:command(Preflist, #etsdb_dump_req_v1{bucket = Bucket, file = File, param = Param, req_id = ReqID, is_delete = IsDelete}, {fsm, undefined, self()}, etsdb_vnode_master).
 
+stream(ReqID, Vnode, Scans,From) ->
+    riak_core_vnode_master:command([{Vnode, node()}], #etsdb_get_query_req_v1{get_query = Scans, req_id = ReqID, bucket = {stream,From}}, {fsm, undefined, self()}, etsdb_vnode_master).
 scan(ReqID, Vnode, Scans) ->
     riak_core_vnode_master:command([{Vnode, node()}], #etsdb_get_query_req_v1{get_query = Scans, req_id = ReqID, bucket = custom_scan}, {fsm, undefined, self()}, etsdb_vnode_master).
 get_query(ReqID, Preflist, Bucket, Query) ->
@@ -227,6 +230,20 @@ handle_command(?ETSDB_STORE_REQ{bucket = Bucket, value = Value, req_id = ReqID},
     end,
     {noreply, State#state{backend_ref = NewBackEndRef}};
 
+handle_command(?ETSDB_GET_QUERY_REQ{get_query = Scans, req_id = ReqID, bucket = {stream,Stream}}, Sender,
+    #state{backend = BackEndModule, backend_ref = BackEndRef, vnode_index = Index} = State) ->
+    case do_scan(BackEndModule, BackEndRef, Scans) of
+        {async, AsyncWork} ->
+            Fun =
+                fun() ->
+                    Me = self(),
+                    riak_core_vnode:reply(Sender, {r, Index, ReqID,[{Index,Me}]}),
+                    AsyncWork() end,
+            {async, {stream,Stream,Fun}, Sender, State};
+        Result ->
+            riak_core_vnode:reply(Sender, {r, Index, ReqID, Result}),
+            {noreply, State}
+    end;
 handle_command(?ETSDB_GET_QUERY_REQ{get_query = Scans, req_id = ReqID, bucket = custom_scan}, Sender,
     #state{backend = BackEndModule, backend_ref = BackEndRef, vnode_index = Index} = State) ->
     case do_scan(BackEndModule, BackEndRef, Scans) of
