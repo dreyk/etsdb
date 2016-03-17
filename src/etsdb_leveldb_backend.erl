@@ -381,10 +381,14 @@ open_db(State0, RetriesLeft, _) ->
                     timer:sleep(SleepFor),
                     open_db(State0, RetriesLeft - 1, Reason);
                 false ->
-                    {error, Reason}
+                    lager:info("Try repair DB ~p",[Reason]),
+                    eleveldb:repair(State0#state.data_root,State0#state.open_opts),
+                    open_db(State0, RetriesLeft - 1, Reason)
             end;
         {error, Reason} ->
-            {error, Reason}
+            lager:info("Try repair DB ~p",[Reason]),
+            eleveldb:repair(State0#state.data_root,State0#state.open_opts),
+            open_db(State0, RetriesLeft - 1, Reason)
     end.
 
 %% @private
