@@ -39,9 +39,9 @@ handle_work({invoke,Fun}, Sender, State) ->
             {reply,Res,State}
     end;
 
-handle_work({stream,{Ref,Receiver},Fun}, _Sender, State) ->
-    Res = Fun(),
-    Receiver ! {Ref,{done,Res}},
+handle_work({stream,I,{Ref,Receiver},Fun}, _Sender, State) ->
+    Fun(),
+    Receiver ! {Ref,{done,I}},
     {noreply,State};
 handle_work({scan,Fun}, Sender, State) ->
     Res = Fun(),

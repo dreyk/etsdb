@@ -240,7 +240,7 @@ handle_command(?ETSDB_GET_QUERY_REQ{get_query = Scans, req_id = ReqID, bucket = 
                     Me = self(),
                     riak_core_vnode:reply(Sender, {r, Index, ReqID,{ok,[{Index,Me}]}}),
                     AsyncWork() end,
-            {async, {stream,Stream,Fun}, Sender, State};
+            {async, {stream,Index,Stream,Fun}, Sender, State};
         Result ->
             riak_core_vnode:reply(Sender, {r, Index, ReqID, Result}),
             {noreply, State}
